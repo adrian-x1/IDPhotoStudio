@@ -1,14 +1,9 @@
 import importlib.util
 import math
 from pathlib import Path
-import sys
 import unittest
 
 
-REQUIRES_PYTHON_311 = sys.version_info[:2] == (3, 11)
-
-
-@unittest.skipUnless(REQUIRES_PYTHON_311, "requires Python 3.11")
 class FaceDetectionIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

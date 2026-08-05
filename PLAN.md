@@ -16,15 +16,38 @@ created: 2026-08-05
 
 | 项 | 选择 | 原因 |
 |---|---|---|
-| 语言 / GUI | Python 3.11 + PySide6 | Mac 上能直接跑起来看界面，图像生态最全 |
+| 语言 / GUI | Python 3.13 + PySide6 | Mac 上能直接跑起来看界面，图像生态最全 |
 | 图像处理 | Pillow + OpenCV | 裁剪、合成、排版 |
 | 抠图 | rembg + `isnet-general-use` 模型，CPU 推理 | 发丝边缘接近专业水平；Xeon E5-2680 v2 单张 1-3 秒够用 |
-| 人脸检测 | MediaPipe Face Detection | 定位五官算裁剪框 |
+| 人脸检测 | MediaPipe 1.0 Tasks API 的 `FaceDetector` | 拿 bbox 宽度和双眼坐标算裁剪框 |
 | 打印 | PySide6 `QPrinter` + `QPageSize`，全尺寸模式 | 唯一能锁定物理尺寸不被驱动缩放的方案 |
 | 打包 | PyInstaller **onedir**（不是 onefile） | onefile 每次启动都要把 ~180MB 模型解压到临时目录，慢 |
 | 代码传输 | 手动打包 zip 传到 Windows 机器 | 用户环境无法访问 GitHub |
 
-Python 3.11 不要换 3.12/3.13，MediaPipe 和 onnxruntime 的 wheel 在新版本上经常缺。
+**Python 用 3.13，Mac 和 Windows 两边必须一致。** 已在 Mac（3.13.7 / arm64）实测：mediapipe 1.0.0、rembg 2.0.77、onnxruntime 1.23.2、opencv 5.0.0、PySide6 6.9.3 全部装得上、跑得通。不要用 3.14，太新，部分包还没跟上。
+
+MediaPipe 1.0 **删除了旧的 `mp.solutions` API**，`mp.solutions.face_detection` 会直接报 `AttributeError`。新写法：
+
+```python
+import mediapipe as mp
+from mediapipe.tasks.python import BaseOptions
+from mediapipe.tasks.python.vision import FaceDetector, FaceDetectorOptions
+
+opts = FaceDetectorOptions(
+    base_options=BaseOptions(model_asset_path='assets/models/blaze_face_short_range.tflite'),
+    min_detection_confidence=0.5,
+)
+detector = FaceDetector.create_from_options(opts)
+result = detector.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_array))
+```
+
+`detections[0].bounding_box` 是绝对像素（`origin_x/origin_y/width/height`），而 `keypoints` 是**归一化坐标**（0-1，需乘图像宽高）。两者单位不同，容易混。keypoints 顺序：0 右眼、1 左眼、2 鼻尖、3 嘴中心、4 右耳、5 左耳。
+
+人脸检测模型也要提前下好（224KB，来自 Google CDN 而非 GitHub，Windows 那台大概能直连）：
+```bash
+curl -L -o assets/models/blaze_face_short_range.tflite \
+  https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
+```
 
 ## 两个必踩的坑（先解决，否则后面全白干）
 
@@ -107,16 +130,41 @@ def solve_layout(photo_w_mm, photo_h_mm, gap=1.0, margin=1.0, paper=(102,152)):
 
 排完后把整个网格在相纸上**居中**，别左上角堆着。每张照片四周画 0.3mm 浅灰细线当裁剪参考线（可开关）。
 
-### 裁剪规格
+### 裁剪规格（已用真实样片实测定稿）
 
-MediaPipe 检测人脸后按国标算裁剪框，不要简单地按人脸框等比放大：
+**不追求国标级精度。** 目标是自动算出一个八成对的框，人眼扫一下、需要时手动拖一下，比追求全自动完美可靠。
 
-- 头顶留白 = 照片高度的 **7%–12%**
-- 头部（下巴到头顶）占照片高度 **60%–72%**
-- 双眼水平线位于照片顶部往下 **约 45%** 处
-- 人脸中轴线水平居中
+只用两个参数，各自独立可调：
 
-先按头高定 scale，再按眼睛高度定竖直偏移，最后按中轴线定水平偏移。如果算出的框超出原图边界，就往回收并提示用户「原图裁剪空间不足，建议重拍留多点余量」，不要静默拉伸或补黑边。
+```
+K = 1.55          # 裁剪宽 = bbox 宽 × K，控制头的大小
+EYE_LINE = 0.42   # 眼睛中点位于裁剪框高度的 42% 处，控制上下位置
+```
+
+算法三步，没有第四步：
+
+1. 裁剪宽 = `bbox.width × K`，裁剪高 = 裁剪宽 × (规格高 mm / 规格宽 mm)
+2. 水平：双眼中点 x 居中
+3. 竖直：`top = 眼睛中点 y − 裁剪高 × EYE_LINE`
+
+**不要推算头顶和下巴位置。** BlazeFace 的 bbox 是正方形（`w == h`，三张样片实测确认），上沿不在眉毛、下沿远超下巴延伸到脖子肩膀，拿上下沿当解剖学基准会引入不稳定误差。只有 bbox 宽度和眼睛坐标是可靠的：宽度只跟人脸宽度相关，眼睛是直接检测出来的、不是推断的。
+
+原「头顶留白 7-12% + 头高 60-72% + 眼线 45% + 中轴居中」四约束联动方案已作废：那是照相馆验收标准，不适合用来算框——四个约束互相牵制、都依赖推断的头顶下巴、误差叠加。
+
+三张真实手机样片实测（3072×4096，一寸规格）：
+
+| 样片 | 裁剪框 | 越界 | 裁后像素 vs 需求 295×413 |
+|---|---|---|---|
+| 平头男性 | 1559×2183 | 无 | 5 倍余量 |
+| 蓬松短发男性 | 1617×2263 | 无 | 5 倍余量 |
+| 长发女性 | 1626×2276 | 无 | 5 倍余量 |
+
+发型差异会导致头顶余白不一致（蓬松发型偏紧、平头偏松），这是单一系数的固有局限，靠界面手动微调兜底，不要试图用更复杂的算法消除。
+
+两个独立的失败标志，不要合并：
+
+- `insufficient_space`：框超出原图边界 → 往回收并提示「原图裁剪空间不足，建议重拍留多点余量」，不许静默拉伸或补黑边
+- `insufficient_resolution`：框在原图内但像素小于规格 300 DPI 所需 → 放大会糊，需提示
 
 检测不到人脸时不要崩，退化成手动裁剪模式，给用户一个可拖拽的固定比例框。
 
@@ -173,8 +221,8 @@ idphoto/
 ├── main.py                  # 入口，第一件事就是设 U2NET_HOME
 ├── core/
 │   ├── units.py             # mm↔px 唯一转换处
-│   ├── detect.py            # MediaPipe 人脸检测
-│   ├── crop.py              # 国标裁剪框计算
+│   ├── detect.py            # MediaPipe FaceDetector，输出 bbox 宽 + 双眼坐标
+│   ├── crop.py              # 裁剪框计算（K + EYE_LINE 两参数）
 │   ├── matting.py           # rembg 抠图 + 换底 + alpha 修补
 │   ├── layout.py            # solve_layout + 网格合成
 │   └── printing.py          # QPrinter / PDF / PNG 导出
@@ -182,7 +230,9 @@ idphoto/
 │   ├── main_window.py
 │   ├── crop_view.py         # 可拖拽裁剪框
 │   └── brush_view.py        # alpha 修补画笔
-├── assets/models/isnet-general-use.onnx
+├── assets/models/
+│   ├── isnet-general-use.onnx          # rembg 抠图，170MB
+│   └── blaze_face_short_range.tflite   # 人脸检测，224KB
 ├── specs.json               # 10 个可选规格：毫米尺寸 + 电子照目标像素
 ├── tests/
 ├── requirements.txt
@@ -206,7 +256,9 @@ PySide6 套上去，三栏布局，抠图丢后台线程。加可拖拽裁剪框
 `printing.py` 三条路径都实现。Mac 上先验证导出的 PNG/PDF 物理尺寸对不对（用预览打开看文档属性里的尺寸是不是 102×152mm）。
 
 **阶段 4：Windows 打包与真机验证**
-写 `build.spec`，把代码 + 模型打包成 zip 传到 Windows 机器。Windows 上装 Python 3.11 → `pip install -r requirements.txt` → `pyinstaller build.spec` → 跑 exe。真机必须验证：模型加载不联网、抠图能出结果、**实际打印一张量一下尺寸对不对**。
+写 `build.spec`，把代码 + 两个模型打包成 zip 传到 Windows 机器。Windows 上装 **Python 3.13**（和 Mac 一致）→ `pip install -r requirements.txt` → `pyinstaller build.spec` → 跑 exe。真机必须验证：两个模型加载都不联网、抠图能出结果、**实际打印一张量一下尺寸对不对**。
+
+注意 Mac 是 arm64、Windows 是 x86_64，架构不同，Mac 上装好的包不能直接拷过去，Windows 必须自己 `pip install` 一遍。
 
 ## 传输与打包流程（无 GitHub 环境）
 
@@ -216,20 +268,37 @@ cd idphoto && zip -r ../idphoto-src.zip . \
   -x "*.venv/*" "*__pycache__/*" "*.DS_Store" "build/*" "dist/*"
 ```
 
-模型 ~180MB，微信传文件、U 盘、局域网共享都行。Windows 机器上还需要联网装一次 pip 依赖（PyPI 通常能访问，和 GitHub 不同）。如果 PyPI 也不通，在 Mac 上用 `pip download -d wheels -r requirements.txt --platform win_amd64 --only-binary=:all: --python-version 3.11` 把 wheel 全下好一起传，Windows 上 `pip install --no-index --find-links wheels -r requirements.txt`。
+模型 ~180MB，微信传文件、U 盘、局域网共享都行。Windows 机器上还需要联网装一次 pip 依赖（PyPI 通常能访问，和 GitHub 不同）。如果 PyPI 也不通，在 Mac 上用 `pip download -d wheels -r requirements.txt --platform win_amd64 --only-binary=:all: --python-version 3.13` 把 wheel 全下好一起传，Windows 上 `pip install --no-index --find-links wheels -r requirements.txt`。
 
 ## 当前进展
 
-规划完成，代码尚未开始。已定技术栈与算法规格，已验算排版数量表，已核实 rembg 离线模型与 onnxruntime 打包两个坑的解法。
+代码在 `~/Projects/idphoto/`（库外，避免 iCloud 同步虚拟环境和模型），git 已初始化，`PLAN.md` 是本文件的副本，`./sync-plan.sh` 从库同步。
+
+已完成：
+
+- **环境**：Python 3.13.7 虚拟环境 `.venv/`，全部依赖装好并验证 import 通过；两个模型已下载，rembg 离线加载确认不联网
+- **`units.py`**：mm↔px 唯一转换处，300 DPI
+- **`layout.py`**：`solve_layout` 四组合求解，10 个规格的张数、布局全部与验收表一致。并列时优先级为：张数 → 横向相纸 → 照片不旋转 → 列数
+- **`specs.json`**：10 个规格，毫米尺寸 + 门店电子照目标像素
+- **`detect.py` / `crop.py`**：已写但**基于已作废的国标四约束方案，需按新的两参数规则重写**
+- 测试 10 个，纯逻辑部分全绿
+
+已作废并修正的三个错误假设：
+
+1. Python 锁 3.11 —— 实测 3.13 全部依赖可用，MediaPipe 已出 1.0
+2. `mp.solutions` API —— MediaPipe 1.0 已删除，改用 Tasks API
+3. 国标四约束裁剪 —— BlazeFace bbox 是正方形，上下沿不对应眉毛下巴，改用 K + EYE_LINE 两参数
 
 ## 下一步
 
-在 Mac 上建项目骨架，装依赖，下载 `isnet-general-use.onnx` 到 `assets/models/`，然后让 Codex 做阶段 1 的 `units.py` + `layout.py` + `specs.json` + 10 个可选规格的数量表单元测试。**先只做这三个文件加测试，跑绿了再往下。**
+按新的两参数裁剪规则重写 `core/detect.py` 和 `core/crop.py`：`detect.py` 改用 MediaPipe 1.0 Tasks API，只输出 bbox 宽度和双眼坐标；`crop.py` 删掉 CROWN_RATIO 和四约束联动，只留 K 和 EYE_LINE。测试用三张真实样片验证无越界。
+
+之后是 `matting.py`（rembg 抠图 + 三种底色），然后阶段 1 收尾的命令行脚本。
 
 ## 验收标准
 
 - 排版求解函数输出与上表完全一致
-- 手机拍的照片能自动裁出符合国标比例的证件照，人脸居中
+- 手机拍的照片能自动裁出比例正确的证件照，人脸居中、头顶余白肉眼看着合理（不追求国标级精度，允许发型差异带来的偏差，靠手动微调兜底）
 - 换蓝底后发丝边缘无明显白边（修补画笔可补救）
 - 导出 PDF 物理尺寸精确为 102×152mm
 - 实际打印后用尺子量，单张照片尺寸误差 < 0.5mm
