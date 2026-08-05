@@ -1,11 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, copy_metadata
 
 
 datas = (
     collect_data_files("onnxruntime")
     + collect_data_files("mediapipe")
+    + copy_metadata("pymatting")
     + [
         ("assets/models/isnet-general-use.onnx", "assets/models"),
         ("assets/models/blaze_face_short_range.tflite", "assets/models"),
