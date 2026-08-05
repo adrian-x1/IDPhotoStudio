@@ -1,8 +1,9 @@
-"""Pure geometry for the measured two-parameter ID-photo crop.
+"""Pure geometry for the measured ID-photo crop.
 
 ``K`` controls rendered head size by scaling the detector's face-box width.
 ``EYE_LINE`` controls vertical placement by fixing the eyes within the crop.
-Both are independently adjustable empirical values measured from real samples.
+``LOWER_EDGE_LIFT_RATIO`` shifts the entire fixed-ratio crop upward to include
+less clothing below the shoulders.  All three are adjustable empirical values.
 """
 
 from dataclasses import dataclass
@@ -12,6 +13,9 @@ from core.units import mm_to_px
 
 K = 1.55
 EYE_LINE = 0.42
+# Fraction of crop height shifted upward to raise the lower edge and reduce
+# clothing in frame.  This 5% default is an empirical starting value.
+LOWER_EDGE_LIFT_RATIO = 0.05
 
 
 @dataclass(frozen=True)
@@ -60,13 +64,17 @@ def calculate_crop_box(
     image_width: float,
     image_height: float,
     target_size: TargetSize,
+    *,
+    lower_edge_lift_ratio: float = LOWER_EDGE_LIFT_RATIO,
 ) -> CropResult:
     """Calculate a fixed-ratio crop from face-box width and eye position."""
     crop_width = face.bbox_width * K
     crop_height = crop_width * target_size.height_mm / target_size.width_mm
 
     left = face.eyes_center.x - crop_width / 2
-    top = face.eyes_center.y - crop_height * EYE_LINE
+    top = face.eyes_center.y - crop_height * (
+        EYE_LINE + lower_edge_lift_ratio
+    )
     insufficient_space = (
         left < 0
         or top < 0
@@ -79,7 +87,9 @@ def calculate_crop_box(
         crop_width *= fit_scale
         crop_height *= fit_scale
         left = face.eyes_center.x - crop_width / 2
-        top = face.eyes_center.y - crop_height * EYE_LINE
+        top = face.eyes_center.y - crop_height * (
+            EYE_LINE + lower_edge_lift_ratio
+        )
 
     left = min(max(left, 0.0), image_width - crop_width)
     top = min(max(top, 0.0), image_height - crop_height)

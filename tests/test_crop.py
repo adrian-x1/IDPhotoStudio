@@ -5,6 +5,7 @@ import unittest
 from core.crop import (
     EYE_LINE,
     K,
+    LOWER_EDGE_LIFT_RATIO,
     FaceGeometry,
     Point,
     TargetSize,
@@ -18,7 +19,7 @@ class CropGeometryTests(unittest.TestCase):
         specs_path = Path(__file__).resolve().parents[1] / "specs.json"
         cls.specs = json.loads(specs_path.read_text(encoding="utf-8"))
 
-    def test_all_specs_follow_two_parameter_geometry(self) -> None:
+    def test_all_specs_follow_empirical_geometry(self) -> None:
         face = FaceGeometry(
             bbox_width=1000.0,
             eyes_center=Point(2000.0, 1500.0),
@@ -37,10 +38,32 @@ class CropGeometryTests(unittest.TestCase):
                 self.assertAlmostEqual((box.left + box.right) / 2, face.eyes_center.x)
                 self.assertAlmostEqual(
                     (face.eyes_center.y - box.top) / box.height,
-                    EYE_LINE,
+                    EYE_LINE + LOWER_EDGE_LIFT_RATIO,
                 )
                 self.assertFalse(result.insufficient_space)
                 self.assertFalse(result.insufficient_resolution)
+
+    def test_lower_edge_lift_is_adjustable_and_preserves_crop_ratio(self) -> None:
+        face = FaceGeometry(
+            bbox_width=1000.0,
+            eyes_center=Point(2000.0, 1500.0),
+        )
+        target = TargetSize(25, 35)
+
+        lifted = calculate_crop_box(face, 4000, 4000, target)
+        unlifted = calculate_crop_box(
+            face,
+            4000,
+            4000,
+            target,
+            lower_edge_lift_ratio=0.0,
+        )
+
+        expected_lift = lifted.box.height * LOWER_EDGE_LIFT_RATIO
+        self.assertEqual(LOWER_EDGE_LIFT_RATIO, 0.05)
+        self.assertAlmostEqual(unlifted.box.bottom - lifted.box.bottom, expected_lift)
+        self.assertAlmostEqual(unlifted.box.top - lifted.box.top, expected_lift)
+        self.assertAlmostEqual(lifted.box.width / lifted.box.height, 25 / 35)
 
     def test_space_shortage_shifts_box_inside_without_changing_size(self) -> None:
         face = FaceGeometry(
