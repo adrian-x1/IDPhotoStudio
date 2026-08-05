@@ -316,12 +316,15 @@ class MainWindow(QMainWindow):
         self.white_background_radio = QRadioButton("白")
         self.blue_background_radio = QRadioButton("蓝")
         self.red_background_radio = QRadioButton("红")
-        for radio in (
-            self.original_background_radio,
-            self.white_background_radio,
-            self.blue_background_radio,
-            self.red_background_radio,
-        ):
+        background_radios = (
+            (self.original_background_radio, "backgroundOriginal"),
+            (self.white_background_radio, "backgroundWhite"),
+            (self.blue_background_radio, "backgroundBlue"),
+            (self.red_background_radio, "backgroundRed"),
+        )
+        for radio, object_name in background_radios:
+            radio.setObjectName(object_name)
+            radio.setProperty("segment", True)
             self.background_group.addButton(radio)
             first_row.addWidget(radio)
         self.original_background_radio.setChecked(True)

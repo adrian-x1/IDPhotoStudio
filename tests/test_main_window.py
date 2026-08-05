@@ -12,7 +12,7 @@ from PIL import Image
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QButtonGroup, QPushButton, QRadioButton
 
 from core.crop import (
     CropBox,
@@ -125,6 +125,24 @@ class MainWindowTests(unittest.TestCase):
             IMAGE_FILE_FILTER,
             "照片 (*.jpg *.jpeg *.png *.webp *.bmp *.tif *.tiff)",
         )
+
+    def test_background_choices_remain_radio_buttons_with_segment_styles(self) -> None:
+        self.assertIsInstance(self.window.background_group, QButtonGroup)
+        self.assertTrue(self.window.background_group.exclusive())
+        radios = (
+            self.window.original_background_radio,
+            self.window.white_background_radio,
+            self.window.blue_background_radio,
+            self.window.red_background_radio,
+        )
+        self.assertEqual(
+            [radio.objectName() for radio in radios],
+            ["backgroundOriginal", "backgroundWhite", "backgroundBlue", "backgroundRed"],
+        )
+        for radio in radios:
+            with self.subTest(radio=radio.objectName()):
+                self.assertIsInstance(radio, QRadioButton)
+                self.assertTrue(radio.property("segment"))
 
     def test_drag_enter_only_accepts_supported_local_files(self) -> None:
         valid = self.drag_enter_event(QUrl.fromLocalFile(str(self.image_path)))

@@ -28,37 +28,71 @@ class ThemeTests(unittest.TestCase):
         self.assertIsNotNone(spec, "ui.theme must centralize the visual tokens")
         return importlib.import_module("ui.theme")
 
-    def test_locked_theme_colors_meet_aa_contrast(self) -> None:
+    def test_darkroom_theme_colors_meet_aa_contrast(self) -> None:
         theme = self.load_theme()
 
-        self.assertEqual(theme.COLORS["background"], "#F7F4ED")
-        self.assertEqual(theme.COLORS["primary"], "#B85C3B")
-        self.assertEqual(theme.COLORS["muted_text"], "#6F6A61")
+        expected = {
+            "background": "#17181A",
+            "surface": "#1F2124",
+            "control": "#282B2F",
+            "control_hover": "#31353A",
+            "border": "#34383D",
+            "text": "#E8E6E3",
+            "muted_text": "#9A9A96",
+            "primary": "#E8B04B",
+            "focus": "#E8B04B",
+        }
+        for name, color in expected.items():
+            with self.subTest(token=name):
+                self.assertEqual(theme.COLORS[name], color)
+
         self.assertGreaterEqual(
-            contrast_ratio("#FFFFFF", theme.COLORS["primary"]),
+            contrast_ratio(theme.COLORS["text"], theme.COLORS["surface"]),
             4.5,
         )
         self.assertGreaterEqual(
             contrast_ratio(
                 theme.COLORS["muted_text"],
-                theme.COLORS["background"],
+                theme.COLORS["surface"],
             ),
             4.5,
         )
+        self.assertGreaterEqual(
+            contrast_ratio(theme.COLORS["background"], theme.COLORS["primary"]),
+            4.5,
+        )
 
-    def test_primary_interaction_colors_only_get_darker(self) -> None:
+    def test_native_controls_are_fully_redrawn(self) -> None:
         theme = self.load_theme()
 
-        primary = relative_luminance(theme.COLORS["primary"])
-        hover = relative_luminance(theme.COLORS["primary_hover"])
-        pressed = relative_luminance(theme.COLORS["primary_pressed"])
-        self.assertLessEqual(hover, primary)
-        self.assertLessEqual(pressed, hover)
+        stylesheet = theme.APP_STYLESHEET
+        required_fragments = (
+            "QComboBox::down-arrow",
+            "chevron-down.svg",
+            "QDoubleSpinBox::up-arrow",
+            "spin-up.svg",
+            "QDoubleSpinBox::down-arrow",
+            "spin-down.svg",
+            'QRadioButton[segment="true"]',
+            "QCheckBox::indicator:checked",
+            "checkmark.svg",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, stylesheet)
 
-    def test_stylesheet_keeps_a_visible_warm_focus_state(self) -> None:
+        for path in theme.CONTROL_ICON_PATHS.values():
+            with self.subTest(icon=path.name):
+                self.assertTrue(path.is_file())
+
+    def test_stylesheet_keeps_a_one_pixel_amber_focus_state(self) -> None:
         theme = self.load_theme()
 
         self.assertIn("QDoubleSpinBox:focus", theme.APP_STYLESHEET)
+        self.assertIn(
+            f'border: 1px solid {theme.COLORS["focus"]}',
+            theme.APP_STYLESHEET,
+        )
         self.assertIn(theme.COLORS["focus"], theme.APP_STYLESHEET)
         self.assertNotIn("outline: none", theme.APP_STYLESHEET.lower())
 
