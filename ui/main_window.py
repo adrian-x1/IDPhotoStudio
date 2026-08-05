@@ -30,10 +30,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.crop import FaceGeometry, TargetSize, calculate_crop_box
+from core.crop import (
+    CropBox,
+    FaceGeometry,
+    TargetSize,
+    calculate_crop_box,
+    is_insufficient_resolution,
+)
 from core.detect import detect_face
 from core.layout import compose_sheet, solve_layout
 from core.matting import composite_background
+from ui.crop_view import CropView
 from ui.matting_worker import MattingWorker
 
 
@@ -110,6 +117,8 @@ class MainWindow(QMainWindow):
         self.finished_photo: Image.Image | None = None
         self.sheet_image: Image.Image | None = None
         self._crop_warning = ""
+        self._crop_space_warning = ""
+        self._crop_mode_note = ""
         self._crop_revision = 0
         self._foreground_cache: tuple[int, Image.Image] | None = None
         self._active_worker: MattingWorker | None = None
@@ -135,10 +144,16 @@ class MainWindow(QMainWindow):
         self.import_button.setMinimumHeight(36)
         self.import_button.setAccessibleName("导入照片")
         top_bar.addWidget(self.import_button)
+        self.reset_crop_button = QPushButton("重置为自动")
+        self.reset_crop_button.setMinimumHeight(36)
+        self.reset_crop_button.setAccessibleName("重置裁剪框为自动位置")
+        self.reset_crop_button.setEnabled(False)
+        top_bar.addWidget(self.reset_crop_button)
         top_bar.addStretch(1)
         root.addLayout(top_bar)
 
-        self.original_preview = ImagePreview("尚未导入照片", "原图预览")
+        self.crop_view = CropView()
+        self.original_preview = self.crop_view
         self.crop_preview = ImagePreview("等待自动裁剪", "裁剪和换底预览")
         self.sheet_preview = ImagePreview("等待生成相纸排版", "相纸排版预览")
 
@@ -236,7 +251,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _preview_panel(
         title: str,
-        preview: ImagePreview,
+        preview: QWidget,
         footer: QWidget | None = None,
     ) -> QWidget:
         panel = QWidget()
@@ -265,6 +280,11 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.import_button.clicked.connect(self._choose_image)
+        self.reset_crop_button.clicked.connect(self.crop_view.reset_to_auto)
+        self.crop_view.cropBoxChanged.connect(self._on_crop_box_changed)
+        self.crop_view.interactionFinished.connect(
+            self._on_crop_interaction_finished
+        )
         self.spec_combo.currentTextChanged.connect(self._on_spec_changed)
         self.gap_spin.valueChanged.connect(self._refresh_layout)
         self.margin_spin.valueChanged.connect(self._refresh_layout)
@@ -294,17 +314,21 @@ class MainWindow(QMainWindow):
             with Image.open(path) as opened:
                 source = ImageOps.exif_transpose(opened).convert("RGB")
         except (FileNotFoundError, OSError, ValueError) as error:
+            self.source_image = None
+            self.crop_view.clear_image()
+            self.reset_crop_button.setEnabled(False)
             self._clear_processed_previews()
             self._set_matting_progress(False)
             self.status_label.setText(f"无法读取照片：{error}")
             return False
 
         self.source_image = source
-        self.original_preview.set_image(source)
+        self.crop_view.set_image(source)
         try:
             face = detect_face(np.asarray(source))
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
             self.face = None
+            self.reset_crop_button.setEnabled(False)
             self._clear_processed_previews()
             self._set_matting_progress(False)
             self.status_label.setText(f"人脸检测失败：{error}")
@@ -312,9 +336,7 @@ class MainWindow(QMainWindow):
 
         if face is None:
             self.face = None
-            self._clear_processed_previews()
-            self._set_matting_progress(False)
-            self.status_label.setText("未检测到人脸；下一步可使用手动裁剪框")
+            self._refresh_crop()
             return False
 
         self.face = face
@@ -322,35 +344,97 @@ class MainWindow(QMainWindow):
         return True
 
     def _on_spec_changed(self) -> None:
-        if self.source_image is not None and self.face is not None:
+        if self.source_image is not None:
             self._refresh_crop()
 
     def _refresh_crop(self) -> None:
-        if self.source_image is None or self.face is None:
+        if self.source_image is None:
             return
         self._invalidate_crop_revision()
         spec = self.specs[self.spec_combo.currentText()]
         target = TargetSize(spec["width_mm"], spec["height_mm"])
-        result = calculate_crop_box(
-            self.face,
-            self.source_image.width,
-            self.source_image.height,
-            target,
-        )
-        box = result.box
+        aspect_ratio = target.width_mm / target.height_mm
+        if self.face is not None:
+            result = calculate_crop_box(
+                self.face,
+                self.source_image.width,
+                self.source_image.height,
+                target,
+            )
+            box = result.box
+            self._crop_space_warning = (
+                "原图裁剪空间不足，建议重拍留多点余量"
+                if result.insufficient_space
+                else ""
+            )
+            self._crop_mode_note = ""
+            self.reset_crop_button.setEnabled(True)
+        else:
+            box = self._centered_manual_box(aspect_ratio)
+            self._crop_space_warning = ""
+            self._crop_mode_note = "未检测到人脸，已进入手动裁剪模式"
+            self.reset_crop_button.setEnabled(False)
+
+        self.crop_view.set_content(self.source_image, box, aspect_ratio)
+        self._set_cropped_original(box)
+        self._update_crop_warning(box, target)
+        self._apply_background_selection()
+
+    def _centered_manual_box(self, aspect_ratio: float) -> CropBox:
+        assert self.source_image is not None
+        maximum_width = self.source_image.width * 0.8
+        maximum_height = self.source_image.height * 0.8
+        width = min(maximum_width, maximum_height * aspect_ratio)
+        height = width / aspect_ratio
+        left = (self.source_image.width - width) / 2
+        top = (self.source_image.height - height) / 2
+        return CropBox(left, top, left + width, top + height)
+
+    def _set_cropped_original(self, box: CropBox) -> None:
+        assert self.source_image is not None
         self.cropped_original = self.source_image.crop(
             (round(box.left), round(box.top), round(box.right), round(box.bottom))
         )
-        self.finished_photo = self.cropped_original
-        self.crop_preview.set_image(self.finished_photo)
 
-        warnings: list[str] = []
-        if result.insufficient_space:
-            warnings.append("原图裁剪空间不足，建议重拍留多点余量")
-        if result.insufficient_resolution:
+    def _update_crop_warning(
+        self,
+        box: CropBox,
+        target: TargetSize,
+    ) -> None:
+        warnings = [self._crop_space_warning] if self._crop_space_warning else []
+        if is_insufficient_resolution(box, target):
             warnings.append("裁剪区域像素不足，放大后可能模糊")
         self._crop_warning = "；".join(warnings)
-        self._apply_background_selection()
+
+    def _on_crop_box_changed(self, box: CropBox) -> None:
+        if self.source_image is None:
+            return
+        self._invalidate_crop_revision()
+        target = self._current_target_size()
+        self._set_cropped_original(box)
+        self._update_crop_warning(box, target)
+        self.finished_photo = self.cropped_original
+        self.crop_preview.set_image(self.finished_photo)
+        self._refresh_layout(resample=Image.Resampling.BOX)
+        self._set_matting_progress(False)
+        if self._selected_background() == ORIGINAL_BACKGROUND:
+            self._set_status("保持原底，未执行抠图")
+        else:
+            self._set_status("正在调整裁剪框，松开后重新抠图")
+
+    def _on_crop_interaction_finished(self, box: CropBox) -> None:
+        del box
+        if self.cropped_original is None:
+            return
+        if self._selected_background() == ORIGINAL_BACKGROUND:
+            self._refresh_layout()
+            self._set_status("保持原底，未执行抠图")
+        else:
+            self._request_matting()
+
+    def _current_target_size(self) -> TargetSize:
+        spec = self.specs[self.spec_combo.currentText()]
+        return TargetSize(spec["width_mm"], spec["height_mm"])
 
     def _on_background_toggled(self, checked: bool) -> None:
         if not checked:
@@ -484,6 +568,8 @@ class MainWindow(QMainWindow):
         self._pending_matting = None
 
     def _set_status(self, message: str) -> None:
+        if self._crop_mode_note:
+            message = f"{message}；{self._crop_mode_note}"
         if self._crop_warning:
             message = f"{message}；{self._crop_warning}"
         self.status_label.setText(message)
@@ -491,7 +577,11 @@ class MainWindow(QMainWindow):
     def _set_matting_progress(self, active: bool) -> None:
         self.progress_bar.setVisible(active)
 
-    def _refresh_layout(self) -> None:
+    def _refresh_layout(
+        self,
+        *,
+        resample: Image.Resampling = Image.Resampling.LANCZOS,
+    ) -> None:
         if self.finished_photo is None:
             return
         spec = self.specs[self.spec_combo.currentText()]
@@ -517,6 +607,7 @@ class MainWindow(QMainWindow):
             layout,
             gap=gap,
             draw_cut_lines=self.cut_lines_check.isChecked(),
+            resample=resample,
         )
         self.sheet_preview.set_image(self.sheet_image)
         self.count_label.setText(f"共 {layout.count} 张")

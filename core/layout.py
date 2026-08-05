@@ -80,6 +80,8 @@ def compose_sheet(
     layout: LayoutResult,
     gap: float = 1.0,
     draw_cut_lines: bool = True,
+    *,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
 ) -> Image.Image:
     """Resize and place one photo across a centered solved 4R grid."""
     canvas = Image.new(
@@ -93,7 +95,7 @@ def compose_sheet(
 
     resized_photo = photo.convert("RGB").resize(
         (mm_to_px(photo_width_mm), mm_to_px(photo_height_mm)),
-        Image.Resampling.LANCZOS,
+        resample,
     )
     if layout.photo_rotated:
         placed_photo = resized_photo.rotate(90, expand=True)

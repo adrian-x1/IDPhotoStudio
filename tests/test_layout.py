@@ -119,6 +119,20 @@ class LayoutTests(unittest.TestCase):
         self.assertLessEqual(abs(expected_left - (sheet.width - expected_right)), 1)
         self.assertLessEqual(abs(expected_top - (sheet.height - expected_bottom)), 1)
 
+    def test_compose_sheet_accepts_fast_preview_resampling(self) -> None:
+        layout = solve_layout(25, 35)
+        photo = Image.new("RGB", (1200, 1600), "navy")
+
+        sheet = compose_sheet(
+            photo,
+            25,
+            35,
+            layout,
+            resample=Image.Resampling.BOX,
+        )
+
+        self.assertEqual(sheet.size, (1205, 1795))
+
     def test_cut_lines_are_optional_and_use_03mm_light_gray(self) -> None:
         layout = solve_layout(25, 35)
         photo = Image.new("RGB", (200, 280), (180, 20, 30))
