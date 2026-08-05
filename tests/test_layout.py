@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 import unittest
 
-from core.layout import solve_layout
+from PIL import Image, ImageChops
+
+from core.layout import CUT_LINE_COLOR, compose_sheet, solve_layout
 from core.units import mm_to_px
 
 
@@ -58,6 +60,84 @@ class LayoutTests(unittest.TestCase):
                     (result.paper_width_mm, result.paper_height_mm),
                     (152, 102),
                 )
+
+    def test_compose_sheet_centers_entire_grid_on_4r_canvas(self) -> None:
+        photo_width_mm = 25
+        photo_height_mm = 35
+        gap_mm = 1.0
+        layout = solve_layout(photo_width_mm, photo_height_mm, gap=gap_mm)
+        photo = Image.new("RGB", (200, 280), (180, 20, 30))
+
+        sheet = compose_sheet(
+            photo,
+            photo_width_mm,
+            photo_height_mm,
+            layout,
+            gap=gap_mm,
+            draw_cut_lines=False,
+        )
+
+        self.assertEqual(
+            sheet.size,
+            (
+                mm_to_px(layout.paper_width_mm),
+                mm_to_px(layout.paper_height_mm),
+            ),
+        )
+
+        placed_width_mm = photo_height_mm if layout.photo_rotated else photo_width_mm
+        placed_height_mm = photo_width_mm if layout.photo_rotated else photo_height_mm
+        grid_width_mm = layout.columns * placed_width_mm + (layout.columns - 1) * gap_mm
+        grid_height_mm = layout.rows * placed_height_mm + (layout.rows - 1) * gap_mm
+        start_x_mm = (layout.paper_width_mm - grid_width_mm) / 2
+        start_y_mm = (layout.paper_height_mm - grid_height_mm) / 2
+        expected_left = mm_to_px(start_x_mm)
+        expected_top = mm_to_px(start_y_mm)
+        expected_right = (
+            mm_to_px(start_x_mm + (layout.columns - 1) * (placed_width_mm + gap_mm))
+            + mm_to_px(placed_width_mm)
+        )
+        expected_bottom = (
+            mm_to_px(start_y_mm + (layout.rows - 1) * (placed_height_mm + gap_mm))
+            + mm_to_px(placed_height_mm)
+        )
+
+        white = Image.new("RGB", sheet.size, "white")
+        self.assertEqual(
+            ImageChops.difference(sheet, white).getbbox(),
+            (expected_left, expected_top, expected_right, expected_bottom),
+        )
+        self.assertLessEqual(abs(expected_left - (sheet.width - expected_right)), 1)
+        self.assertLessEqual(abs(expected_top - (sheet.height - expected_bottom)), 1)
+
+    def test_cut_lines_are_optional_and_use_03mm_light_gray(self) -> None:
+        layout = solve_layout(25, 35)
+        photo = Image.new("RGB", (200, 280), (180, 20, 30))
+        without_lines = compose_sheet(
+            photo,
+            25,
+            35,
+            layout,
+            draw_cut_lines=False,
+        )
+        with_lines = compose_sheet(
+            photo,
+            25,
+            35,
+            layout,
+            draw_cut_lines=True,
+        )
+
+        placed_width_mm = 35 if layout.photo_rotated else 25
+        placed_height_mm = 25 if layout.photo_rotated else 35
+        grid_width_mm = layout.columns * placed_width_mm + layout.columns - 1
+        grid_height_mm = layout.rows * placed_height_mm + layout.rows - 1
+        x = mm_to_px((layout.paper_width_mm - grid_width_mm) / 2)
+        y = mm_to_px((layout.paper_height_mm - grid_height_mm) / 2)
+
+        self.assertEqual(without_lines.getpixel((x, y)), (180, 20, 30))
+        self.assertEqual(with_lines.getpixel((x, y)), CUT_LINE_COLOR)
+        self.assertEqual(with_lines.getpixel((x + mm_to_px(0.3) + 1, y + mm_to_px(0.3) + 1)), (180, 20, 30))
 
 
 if __name__ == "__main__":
