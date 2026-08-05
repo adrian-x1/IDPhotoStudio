@@ -1,0 +1,62 @@
+{
+  "一寸": {
+    "width_mm": 25,
+    "height_mm": 35,
+    "digital_width_px": 295,
+    "digital_height_px": 413
+  },
+  "二寸": {
+    "width_mm": 35,
+    "height_mm": 49,
+    "digital_width_px": 413,
+    "digital_height_px": 579
+  },
+  "三寸": {
+    "width_mm": 55,
+    "height_mm": 84,
+    "digital_width_px": 649,
+    "digital_height_px": 991
+  },
+  "大一寸": {
+    "width_mm": 33,
+    "height_mm": 48,
+    "digital_width_px": 390,
+    "digital_height_px": 567
+  },
+  "小一寸": {
+    "width_mm": 22,
+    "height_mm": 32,
+    "digital_width_px": 260,
+    "digital_height_px": 378
+  },
+  "大二寸": {
+    "width_mm": 35,
+    "height_mm": 53,
+    "digital_width_px": 413,
+    "digital_height_px": 626
+  },
+  "小二寸": {
+    "width_mm": 35,
+    "height_mm": 45,
+    "digital_width_px": 413,
+    "digital_height_px": 531
+  },
+  "简历照": {
+    "width_mm": 25,
+    "height_mm": 35,
+    "digital_width_px": 295,
+    "digital_height_px": 413
+  },
+  "普通话水平测试": {
+    "width_mm": 33,
+    "height_mm": 48,
+    "digital_width_px": 390,
+    "digital_height_px": 567
+  },
+  "英语四六级": {
+    "width_mm": 12,
+    "height_mm": 16,
+    "digital_width_px": 144,
+    "digital_height_px": 192
+  }
+}
