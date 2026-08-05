@@ -9,8 +9,8 @@ import sys
 import numpy as np
 from PIL import Image, ImageOps
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QResizeEvent
+from PySide6.QtCore import QThreadPool, Qt
+from PySide6.QtGui import QCloseEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QRadioButton,
     QSplitter,
@@ -32,6 +33,8 @@ from PySide6.QtWidgets import (
 from core.crop import FaceGeometry, TargetSize, calculate_crop_box
 from core.detect import detect_face
 from core.layout import compose_sheet, solve_layout
+from core.matting import composite_background
+from ui.matting_worker import MattingWorker
 
 
 ORIGINAL_BACKGROUND = "保持原底"
@@ -106,6 +109,14 @@ class MainWindow(QMainWindow):
         self.cropped_original: Image.Image | None = None
         self.finished_photo: Image.Image | None = None
         self.sheet_image: Image.Image | None = None
+        self._crop_warning = ""
+        self._crop_revision = 0
+        self._foreground_cache: tuple[int, Image.Image] | None = None
+        self._active_worker: MattingWorker | None = None
+        self._active_matting_revision: int | None = None
+        self._pending_matting: tuple[int, Image.Image] | None = None
+        self._thread_pool = QThreadPool(self)
+        self._thread_pool.setMaxThreadCount(1)
 
         self.setWindowTitle("证件照排版")
         self.setMinimumSize(900, 620)
@@ -208,6 +219,13 @@ class MainWindow(QMainWindow):
         self.warning_label.setAccessibleName("换底提示")
         root.addWidget(self.warning_label)
 
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setAccessibleName("抠图进度")
+        self.progress_bar.setVisible(False)
+        root.addWidget(self.progress_bar)
+
         self.status_label = QLabel("请先导入一张照片")
         self.status_label.setWordWrap(True)
         self.status_label.setAccessibleName("处理状态")
@@ -251,6 +269,13 @@ class MainWindow(QMainWindow):
         self.gap_spin.valueChanged.connect(self._refresh_layout)
         self.margin_spin.valueChanged.connect(self._refresh_layout)
         self.cut_lines_check.toggled.connect(self._refresh_layout)
+        for radio in (
+            self.original_background_radio,
+            self.white_background_radio,
+            self.blue_background_radio,
+            self.red_background_radio,
+        ):
+            radio.toggled.connect(self._on_background_toggled)
 
     def _choose_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -264,11 +289,13 @@ class MainWindow(QMainWindow):
 
     def load_image(self, path: str | Path) -> bool:
         """Load one image and update the three panes; return whether crop succeeded."""
+        self._invalidate_crop_revision()
         try:
             with Image.open(path) as opened:
                 source = ImageOps.exif_transpose(opened).convert("RGB")
         except (FileNotFoundError, OSError, ValueError) as error:
             self._clear_processed_previews()
+            self._set_matting_progress(False)
             self.status_label.setText(f"无法读取照片：{error}")
             return False
 
@@ -279,12 +306,14 @@ class MainWindow(QMainWindow):
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
             self.face = None
             self._clear_processed_previews()
+            self._set_matting_progress(False)
             self.status_label.setText(f"人脸检测失败：{error}")
             return False
 
         if face is None:
             self.face = None
             self._clear_processed_previews()
+            self._set_matting_progress(False)
             self.status_label.setText("未检测到人脸；下一步可使用手动裁剪框")
             return False
 
@@ -299,6 +328,7 @@ class MainWindow(QMainWindow):
     def _refresh_crop(self) -> None:
         if self.source_image is None or self.face is None:
             return
+        self._invalidate_crop_revision()
         spec = self.specs[self.spec_combo.currentText()]
         target = TargetSize(spec["width_mm"], spec["height_mm"])
         result = calculate_crop_box(
@@ -313,17 +343,153 @@ class MainWindow(QMainWindow):
         )
         self.finished_photo = self.cropped_original
         self.crop_preview.set_image(self.finished_photo)
-        self._refresh_layout()
 
         warnings: list[str] = []
         if result.insufficient_space:
             warnings.append("原图裁剪空间不足，建议重拍留多点余量")
         if result.insufficient_resolution:
             warnings.append("裁剪区域像素不足，放大后可能模糊")
-        if warnings:
-            self.status_label.setText("；".join(warnings))
+        self._crop_warning = "；".join(warnings)
+        self._apply_background_selection()
+
+    def _on_background_toggled(self, checked: bool) -> None:
+        if not checked:
+            return
+        self._update_background_warning()
+        if self.cropped_original is not None:
+            self._apply_background_selection()
+
+    def _selected_background(self) -> str:
+        if self.white_background_radio.isChecked():
+            return "白"
+        if self.blue_background_radio.isChecked():
+            return "蓝"
+        if self.red_background_radio.isChecked():
+            return "红"
+        return ORIGINAL_BACKGROUND
+
+    def _update_background_warning(self) -> None:
+        background = self._selected_background()
+        if background in {"蓝", "红"}:
+            self.warning_label.setText(
+                "白底照片换蓝/红底会在发丝处留白边，建议直接用对应背景色重拍"
+            )
+            self.warning_label.setVisible(True)
+        elif background == "白":
+            self.warning_label.setText("换底是实验功能，效果取决于原图背景。")
+            self.warning_label.setVisible(True)
         else:
-            self.status_label.setText("保持原底，未执行抠图")
+            self.warning_label.clear()
+            self.warning_label.setVisible(False)
+
+    def _apply_background_selection(self) -> None:
+        if self.cropped_original is None:
+            return
+        background = self._selected_background()
+        self._update_background_warning()
+        if background == ORIGINAL_BACKGROUND:
+            self._pending_matting = None
+            self.finished_photo = self.cropped_original
+            self.crop_preview.set_image(self.finished_photo)
+            self._refresh_layout()
+            self._set_matting_progress(False)
+            self._set_status("保持原底，未执行抠图")
+            return
+
+        if (
+            self._foreground_cache is not None
+            and self._foreground_cache[0] == self._crop_revision
+        ):
+            self.finished_photo = composite_background(
+                self._foreground_cache[1],
+                background,
+            )
+            self.crop_preview.set_image(self.finished_photo)
+            self._refresh_layout()
+            self._set_matting_progress(False)
+            self._set_status("换底完成")
+            return
+
+        self.finished_photo = self.cropped_original
+        self.crop_preview.set_image(self.finished_photo)
+        self._refresh_layout()
+        self._request_matting()
+
+    def _request_matting(self) -> None:
+        if self.cropped_original is None:
+            return
+        request = (self._crop_revision, self.cropped_original.copy())
+        self._set_matting_progress(True)
+        self._set_status("正在后台抠图…")
+        if self._active_worker is not None:
+            if self._active_matting_revision != self._crop_revision:
+                self._pending_matting = request
+            return
+        self._start_matting_worker(*request)
+
+    def _start_matting_worker(self, revision: int, image: Image.Image) -> None:
+        worker = MattingWorker(revision, image)
+        worker.signals.succeeded.connect(self._on_matting_succeeded)
+        worker.signals.failed.connect(self._on_matting_failed)
+        self._active_worker = worker
+        self._active_matting_revision = revision
+        self._thread_pool.start(worker)
+
+    def _on_matting_succeeded(self, revision: int, foreground: Image.Image) -> None:
+        self._active_worker = None
+        self._active_matting_revision = None
+        if revision == self._crop_revision:
+            self._foreground_cache = (revision, foreground)
+            if (
+                self._pending_matting is not None
+                and self._pending_matting[0] == revision
+            ):
+                self._pending_matting = None
+            self._apply_background_selection()
+        self._start_latest_pending_or_finish()
+
+    def _on_matting_failed(self, revision: int, message: str) -> None:
+        self._active_worker = None
+        self._active_matting_revision = None
+        if revision == self._crop_revision:
+            self._pending_matting = None
+            if self._selected_background() != ORIGINAL_BACKGROUND:
+                self.original_background_radio.setChecked(True)
+                self.status_label.setText(
+                    f"抠图失败：{message}；已恢复保持原底，可重新选择底色重试"
+                )
+        self._start_latest_pending_or_finish()
+
+    def _start_latest_pending_or_finish(self) -> None:
+        if (
+            self._pending_matting is not None
+            and self._pending_matting[0] == self._crop_revision
+            and self._selected_background() != ORIGINAL_BACKGROUND
+            and not (
+                self._foreground_cache is not None
+                and self._foreground_cache[0] == self._crop_revision
+            )
+        ):
+            revision, image = self._pending_matting
+            self._pending_matting = None
+            self._start_matting_worker(revision, image)
+            return
+        self._pending_matting = None
+        if self._active_worker is None:
+            self._set_matting_progress(False)
+
+    def _invalidate_crop_revision(self) -> None:
+        self._crop_revision += 1
+        self._foreground_cache = None
+        self._pending_matting = None
+
+    def _set_status(self, message: str) -> None:
+        if self._crop_warning:
+            message = f"{message}；{self._crop_warning}"
+        self.status_label.setText(message)
+
+    def _set_matting_progress(self, active: bool) -> None:
+        self.progress_bar.setVisible(active)
 
     def _refresh_layout(self) -> None:
         if self.finished_photo is None:
@@ -364,3 +530,7 @@ class MainWindow(QMainWindow):
         self.sheet_preview.clear_image("等待生成相纸排版")
         self.count_label.setText(EMPTY_COUNT_TEXT)
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._invalidate_crop_revision()
+        self._thread_pool.clear()
+        super().closeEvent(event)
