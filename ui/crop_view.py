@@ -13,9 +13,10 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QStyle, QStyleOption, QWidget
 
 from core.crop import CropBox
+from ui.theme import COLORS
 
 
 class CropView(QWidget):
@@ -27,6 +28,7 @@ class CropView(QWidget):
     HANDLE_HIT_RADIUS = 16.0
     HANDLE_VISUAL_RADIUS = 5.0
     MIN_CROP_VIEW_SIZE = 48.0
+    EMPTY_TEXT = "拖入照片到窗口任意位置\n或点击右上角导入照片"
 
     _CORNER_SIGNS = {
         "top_left": (-1, -1),
@@ -49,6 +51,7 @@ class CropView(QWidget):
         self._drag_changed = False
 
         self.setMinimumSize(160, 220)
+        self.setObjectName("previewCanvas")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName("原图裁剪框")
@@ -105,13 +108,20 @@ class CropView(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:
         del event
         painter = QPainter(self)
-        painter.fillRect(self.rect(), self.palette().window())
+        style_option = QStyleOption()
+        style_option.initFrom(self)
+        self.style().drawPrimitive(
+            QStyle.PrimitiveElement.PE_Widget,
+            style_option,
+            painter,
+            self,
+        )
         if self._pixmap is None or self._pixmap.isNull():
             painter.setPen(self.palette().text().color())
             painter.drawText(
                 self.rect(),
                 Qt.AlignmentFlag.AlignCenter,
-                "尚未导入照片",
+                self.EMPTY_TEXT,
             )
             return
 
@@ -149,7 +159,7 @@ class CropView(QWidget):
         painter.setPen(QPen(QColor(255, 255, 255), 2))
         painter.drawRect(crop_rect)
 
-        handle_color = self.palette().highlight().color()
+        handle_color = QColor(COLORS["primary"])
         painter.setPen(QPen(QColor(255, 255, 255), 2))
         painter.setBrush(handle_color)
         radius = self.HANDLE_VISUAL_RADIUS

@@ -13,6 +13,7 @@ from PySide6.QtCore import QMimeData, QThreadPool, Qt
 from PySide6.QtGui import (
     QCloseEvent,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDropEvent,
     QPixmap,
     QResizeEvent,
@@ -25,7 +26,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -49,6 +49,7 @@ from core.layout import compose_sheet, solve_layout
 from core.matting import composite_background
 from ui.crop_view import CropView
 from ui.matting_worker import MattingWorker
+from ui.theme import apply_theme
 
 
 ORIGINAL_BACKGROUND = "保持原底"
@@ -101,7 +102,8 @@ class ImagePreview(QLabel):
         self._source_pixmap: QPixmap | None = None
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(160, 220)
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setObjectName("previewCanvas")
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self.setAccessibleName(accessible_name)
         self.setWordWrap(True)
         self.setPixmap(QPixmap())
@@ -169,6 +171,9 @@ class MainWindow(QMainWindow):
         self._thread_pool = QThreadPool(self)
         self._thread_pool.setMaxThreadCount(1)
 
+        application = QApplication.instance()
+        if isinstance(application, QApplication):
+            apply_theme(application)
         self.setWindowTitle("证件照排版")
         self.setAcceptDrops(True)
         self.setMinimumSize(900, 620)
@@ -177,64 +182,135 @@ class MainWindow(QMainWindow):
         self._connect_signals()
 
     def _build_ui(self) -> None:
-        central = QWidget(self)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        self.app_shell = QWidget(self)
+        self.app_shell.setObjectName("appShell")
+        self.app_shell.setProperty("dragActive", False)
+        root = QVBoxLayout(self.app_shell)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(8)
 
-        top_bar = QHBoxLayout()
+        self.header_panel = QWidget()
+        self.header_panel.setObjectName("headerPanel")
+        header_layout = QHBoxLayout(self.header_panel)
+        header_layout.setContentsMargins(2, 0, 2, 0)
+        header_layout.setSpacing(10)
+
+        title_layout = QVBoxLayout()
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
+        app_title = QLabel("证件照排版")
+        app_title.setObjectName("appTitle")
+        app_subtitle = QLabel("自动裁剪并排到 6 寸相纸")
+        app_subtitle.setObjectName("appSubtitle")
+        title_layout.addWidget(app_title)
+        title_layout.addWidget(app_subtitle)
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch(1)
+
+        self.import_actions_container = QWidget()
+        import_actions_layout = QHBoxLayout(self.import_actions_container)
+        import_actions_layout.setContentsMargins(0, 0, 0, 0)
+        import_actions_layout.setSpacing(8)
         self.import_button = QPushButton("导入照片")
-        self.import_button.setMinimumHeight(36)
+        self.import_button.setProperty("variant", "primary")
+        self.import_button.setMinimumHeight(38)
         self.import_button.setAccessibleName("导入照片")
-        top_bar.addWidget(self.import_button)
-        self.reset_crop_button = QPushButton("重置为自动")
-        self.reset_crop_button.setMinimumHeight(36)
-        self.reset_crop_button.setAccessibleName("重置裁剪框为自动位置")
-        self.reset_crop_button.setEnabled(False)
-        top_bar.addWidget(self.reset_crop_button)
-        top_bar.addStretch(1)
-        root.addLayout(top_bar)
+        import_actions_layout.addWidget(self.import_button)
+        header_layout.addWidget(self.import_actions_container)
+
+        self.output_actions_separator = QFrame()
+        self.output_actions_separator.setObjectName("outputSeparator")
+        self.output_actions_separator.setFrameShape(QFrame.Shape.VLine)
+        self.output_actions_separator.setVisible(False)
+        header_layout.addWidget(self.output_actions_separator)
+
+        self.output_actions_container = QWidget()
+        self.output_actions_layout = QHBoxLayout(self.output_actions_container)
+        self.output_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.output_actions_layout.setSpacing(8)
+        self.output_actions_container.setVisible(False)
+        header_layout.addWidget(self.output_actions_container)
+        root.addWidget(self.header_panel)
 
         self.crop_view = CropView()
         self.original_preview = self.crop_view
-        self.crop_preview = ImagePreview("等待自动裁剪", "裁剪和换底预览")
-        self.sheet_preview = ImagePreview("等待生成相纸排版", "相纸排版预览")
+        self.crop_preview = ImagePreview("等待裁剪结果", "裁剪和换底预览")
+        self.sheet_preview = ImagePreview("等待生成 6 寸相纸", "相纸排版预览")
+        self.crop_preview.setMinimumWidth(280)
+        self.sheet_preview.setMinimumWidth(280)
+
+        self.reset_crop_button = QPushButton("重置")
+        self.reset_crop_button.setProperty("variant", "quiet")
+        self.reset_crop_button.setAccessibleName("重置裁剪框为自动位置")
+        self.reset_crop_button.setToolTip("恢复自动裁剪位置")
+        self.reset_crop_button.setEnabled(False)
 
         self.count_label = QLabel(EMPTY_COUNT_TEXT)
+        self.count_label.setObjectName("countBadge")
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        count_font = self.count_label.font()
-        count_font.setBold(True)
-        count_font.setPointSize(count_font.pointSize() + 2)
-        self.count_label.setFont(count_font)
         self.count_label.setAccessibleName("排版张数")
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(self._preview_panel("原图", self.original_preview))
-        splitter.addWidget(self._preview_panel("裁剪 + 换底预览", self.crop_preview))
-        splitter.addWidget(
-            self._preview_panel("相纸排版预览", self.sheet_preview, self.count_label)
+        self.original_card = self._preview_panel(
+            "原图与裁剪",
+            "拖动框或四角调整",
+            self.original_preview,
+            self.reset_crop_button,
         )
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        splitter.setStretchFactor(2, 2)
-        splitter.setSizes([240, 480, 480])
-        root.addWidget(splitter, 1)
+        self.crop_card = self._preview_panel(
+            "成片预览",
+            "裁剪与换底结果",
+            self.crop_preview,
+        )
+        self.sheet_card = self._preview_panel(
+            "6 寸相纸",
+            "102 × 152 mm",
+            self.sheet_preview,
+            self.count_label,
+        )
 
-        parameters = QGroupBox("参数")
-        parameter_rows = QVBoxLayout(parameters)
-        parameter_rows.setSpacing(8)
+        self.preview_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.preview_splitter.setChildrenCollapsible(False)
+        self.preview_splitter.setHandleWidth(6)
+        self.preview_splitter.addWidget(self.original_card)
+        self.preview_splitter.addWidget(self.crop_card)
+        self.preview_splitter.addWidget(self.sheet_card)
+        self.preview_splitter.setStretchFactor(0, 1)
+        self.preview_splitter.setStretchFactor(1, 2)
+        self.preview_splitter.setStretchFactor(2, 2)
+        self.preview_splitter.setSizes([200, 400, 400])
+        root.addWidget(self.preview_splitter, 1)
+
+        self.parameters_panel = QFrame()
+        self.parameters_panel.setObjectName("parametersPanel")
+        self.parameters_panel.setProperty("card", True)
+        parameter_rows = QVBoxLayout(self.parameters_panel)
+        parameter_rows.setContentsMargins(14, 8, 14, 10)
+        parameter_rows.setSpacing(5)
+
+        settings_header = QHBoxLayout()
+        settings_header.setContentsMargins(0, 0, 0, 0)
+        settings_title = QLabel("输出设置")
+        settings_title.setObjectName("sectionTitle")
+        settings_header.addWidget(settings_title)
+        settings_header.addStretch(1)
+        self.reset_spacing_button = QPushButton("恢复默认")
+        self.reset_spacing_button.setProperty("variant", "quiet")
+        self.reset_spacing_button.setAccessibleName("重置间距和边距为默认值")
+        self.reset_spacing_button.setToolTip("间距和边距恢复为 1.0mm")
+        settings_header.addWidget(self.reset_spacing_button)
+        parameter_rows.addLayout(settings_header)
+
         first_row = QHBoxLayout()
-        second_row = QHBoxLayout()
-
-        first_row.addWidget(QLabel("规格"))
+        first_row.setContentsMargins(0, 0, 0, 0)
+        first_row.setSpacing(8)
+        first_row.addWidget(self._field_label("规格"))
         self.spec_combo = QComboBox()
+        self.spec_combo.setMinimumWidth(148)
         self.spec_combo.addItems(self.specs)
         self.spec_combo.setAccessibleName("证件照规格")
         first_row.addWidget(self.spec_combo)
-
-        first_row.addSpacing(16)
-        first_row.addWidget(QLabel("底色"))
+        first_row.addSpacing(12)
+        first_row.addWidget(self._field_label("底色"))
         self.background_group = QButtonGroup(self)
         self.original_background_radio = QRadioButton(ORIGINAL_BACKGROUND)
         self.white_background_radio = QRadioButton("白")
@@ -250,34 +326,31 @@ class MainWindow(QMainWindow):
             first_row.addWidget(radio)
         self.original_background_radio.setChecked(True)
         first_row.addStretch(1)
+        parameter_rows.addLayout(first_row)
 
-        self.reset_spacing_button = QPushButton("重置")
-        self.reset_spacing_button.setAccessibleName("重置间距和边距为默认值")
-        self.reset_spacing_button.setToolTip("间距和边距恢复为 1.0mm")
-        second_row.addWidget(self.reset_spacing_button)
-        second_row.addSpacing(16)
-
-        second_row.addWidget(QLabel("间距"))
+        second_row = QHBoxLayout()
+        second_row.setContentsMargins(0, 0, 0, 0)
+        second_row.setSpacing(8)
+        second_row.addWidget(self._field_label("间距"))
         self.gap_spin = self._millimetre_spinbox("照片间距")
         second_row.addWidget(self.gap_spin)
-        second_row.addWidget(QLabel("mm"))
-        second_row.addSpacing(16)
-        second_row.addWidget(QLabel("边距"))
+        second_row.addWidget(self._field_label("mm"))
+        second_row.addSpacing(12)
+        second_row.addWidget(self._field_label("边距"))
         self.margin_spin = self._millimetre_spinbox("相纸边距")
         second_row.addWidget(self.margin_spin)
-        second_row.addWidget(QLabel("mm"))
-        second_row.addSpacing(16)
+        second_row.addWidget(self._field_label("mm"))
+        second_row.addSpacing(12)
         self.cut_lines_check = QCheckBox("裁剪线")
         self.cut_lines_check.setChecked(True)
         self.cut_lines_check.setAccessibleName("显示裁剪线")
         second_row.addWidget(self.cut_lines_check)
         second_row.addStretch(1)
-
-        parameter_rows.addLayout(first_row)
         parameter_rows.addLayout(second_row)
-        root.addWidget(parameters)
+        root.addWidget(self.parameters_panel)
 
         self.warning_label = QLabel("")
+        self.warning_label.setObjectName("warningLabel")
         self.warning_label.setWordWrap(True)
         self.warning_label.setVisible(False)
         self.warning_label.setAccessibleName("换底提示")
@@ -291,31 +364,50 @@ class MainWindow(QMainWindow):
         root.addWidget(self.progress_bar)
 
         self.status_label = QLabel("请先导入一张照片")
+        self.status_label.setObjectName("statusLabel")
         self.status_label.setWordWrap(True)
         self.status_label.setAccessibleName("处理状态")
         root.addWidget(self.status_label)
 
-        self.setCentralWidget(central)
+        self.setCentralWidget(self.app_shell)
 
     @staticmethod
     def _preview_panel(
         title: str,
+        subtitle: str,
         preview: QWidget,
-        footer: QWidget | None = None,
-    ) -> QWidget:
-        panel = QWidget()
+        header_widget: QWidget | None = None,
+    ) -> QFrame:
+        panel = QFrame()
+        panel.setProperty("card", True)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(12, 10, 12, 12)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        title_layout = QVBoxLayout()
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
         heading = QLabel(title)
-        heading_font = heading.font()
-        heading_font.setBold(True)
-        heading.setFont(heading_font)
-        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(heading)
+        heading.setObjectName("cardTitle")
+        description = QLabel(subtitle)
+        description.setObjectName("cardSubtitle")
+        title_layout.addWidget(heading)
+        title_layout.addWidget(description)
+        header.addLayout(title_layout)
+        header.addStretch(1)
+        if header_widget is not None:
+            header.addWidget(header_widget)
+        layout.addLayout(header)
         layout.addWidget(preview, 1)
-        if footer is not None:
-            layout.addWidget(footer)
         return panel
+
+    @staticmethod
+    def _field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("fieldLabel")
+        return label
 
     @staticmethod
     def _millimetre_spinbox(accessible_name: str) -> QDoubleSpinBox:
@@ -365,17 +457,33 @@ class MainWindow(QMainWindow):
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if _first_supported_local_image(event.mimeData()) is not None:
+            self._set_drag_active(True)
             event.acceptProposedAction()
         else:
+            self._set_drag_active(False)
             event.ignore()
 
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self._set_drag_active(False)
+        event.accept()
+
     def dropEvent(self, event: QDropEvent) -> None:
+        self._set_drag_active(False)
         path = _first_supported_local_image(event.mimeData())
         if path is None:
             event.ignore()
             return
         self.load_image(path)
         event.acceptProposedAction()
+
+    def _set_drag_active(self, active: bool) -> None:
+        if self.app_shell.property("dragActive") == active:
+            return
+        self.app_shell.setProperty("dragActive", active)
+        style = self.app_shell.style()
+        style.unpolish(self.app_shell)
+        style.polish(self.app_shell)
+        self.app_shell.update()
 
     def load_image(self, path: str | Path) -> bool:
         """Load one image and update the three panes; return whether crop succeeded."""

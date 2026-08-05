@@ -10,9 +10,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from core.crop import (
     CropBox,
@@ -141,6 +141,17 @@ class MainWindowTests(unittest.TestCase):
                 event = self.drag_enter_event(url)
                 self.window.dragEnterEvent(event)
                 self.assertFalse(event.isAccepted())
+
+    def test_valid_drag_highlight_clears_on_leave(self) -> None:
+        shell = getattr(self.window, "app_shell", None)
+        self.assertIsNotNone(shell)
+        event = self.drag_enter_event(QUrl.fromLocalFile(str(self.image_path)))
+
+        self.window.dragEnterEvent(event)
+        self.assertTrue(shell.property("dragActive"))
+
+        self.window.dragLeaveEvent(QDragLeaveEvent())
+        self.assertFalse(shell.property("dragActive"))
 
     def test_drop_loads_only_the_first_local_image(self) -> None:
         second_path = Path(self.temp_dir.name) / "second.png"
@@ -482,12 +493,97 @@ class MainWindowTests(unittest.TestCase):
 
     def test_clicking_empty_space_drops_spinbox_focus(self) -> None:
         self.load_portrait()
-        self.window.gap_spin.setFocus()
+        parameters_panel = getattr(self.window, "parameters_panel", None)
+        original_card = getattr(self.window, "original_card", None)
+        self.assertIsNotNone(parameters_panel)
+        self.assertIsNotNone(original_card)
+
+        self.window.gap_spin.setFocus(Qt.FocusReason.TabFocusReason)
         self.assertTrue(self.window.gap_spin.hasFocus())
-
-        self.window._clear_parameter_focus()
-
+        QTest.mouseClick(
+            parameters_panel,
+            Qt.MouseButton.LeftButton,
+            pos=parameters_panel.rect().bottomRight() - QPoint(8, 8),
+        )
+        self.app.processEvents()
         self.assertFalse(self.window.gap_spin.hasFocus())
+
+        self.window.margin_spin.setFocus(Qt.FocusReason.TabFocusReason)
+        self.assertTrue(self.window.margin_spin.hasFocus())
+        QTest.mouseClick(
+            original_card,
+            Qt.MouseButton.LeftButton,
+            pos=original_card.rect().topRight() - QPoint(8, -8),
+        )
+        self.app.processEvents()
+        self.assertFalse(self.window.margin_spin.hasFocus())
+
+    def test_claude_layout_reserves_stage_three_actions(self) -> None:
+        header = getattr(self.window, "header_panel", None)
+        output_container = getattr(self.window, "output_actions_container", None)
+        output_layout = getattr(self.window, "output_actions_layout", None)
+        separator = getattr(self.window, "output_actions_separator", None)
+        self.assertIsNotNone(header)
+        self.assertIsNotNone(output_container)
+        self.assertIsNotNone(output_layout)
+        self.assertIsNotNone(separator)
+        self.assertFalse(output_container.isVisible())
+        self.assertFalse(separator.isVisible())
+
+        future_buttons = [
+            QPushButton("导出 PNG"),
+            QPushButton("导出 PDF"),
+            QPushButton("打印"),
+        ]
+        for button in future_buttons:
+            output_layout.addWidget(button)
+        separator.show()
+        output_container.show()
+        self.window.resize(900, 620)
+        self.app.processEvents()
+
+        import_rect = self.window.import_button.geometry()
+        import_top_left = self.window.import_button.mapTo(header, QPoint(0, 0))
+        import_rect.moveTopLeft(import_top_left)
+        for button in future_buttons:
+            top_left = button.mapTo(header, QPoint(0, 0))
+            bottom_right = button.mapTo(
+                header,
+                button.rect().bottomRight(),
+            )
+            self.assertTrue(header.rect().contains(top_left))
+            self.assertTrue(header.rect().contains(bottom_right))
+            button_rect = button.geometry()
+            button_rect.moveTopLeft(top_left)
+            self.assertFalse(import_rect.intersects(button_rect))
+
+    def test_minimum_size_keeps_previews_and_parameters_readable(self) -> None:
+        parameters_panel = getattr(self.window, "parameters_panel", None)
+        self.assertIsNotNone(parameters_panel)
+        self.window.resize(900, 620)
+        self.app.processEvents()
+
+        self.assertGreaterEqual(self.window.crop_view.width(), 160)
+        self.assertGreaterEqual(self.window.crop_preview.width(), 280)
+        self.assertGreaterEqual(self.window.sheet_preview.width(), 280)
+        controls = (
+            self.window.spec_combo,
+            self.window.original_background_radio,
+            self.window.red_background_radio,
+            self.window.gap_spin,
+            self.window.margin_spin,
+            self.window.cut_lines_check,
+        )
+        for control in controls:
+            with self.subTest(control=control.accessibleName() or control.text()):
+                top_left = control.mapTo(parameters_panel, QPoint(0, 0))
+                bottom_right = control.mapTo(
+                    parameters_panel,
+                    control.rect().bottomRight(),
+                )
+                self.assertTrue(parameters_panel.rect().contains(top_left))
+                self.assertTrue(parameters_panel.rect().contains(bottom_right))
+
 
 
 if __name__ == "__main__":
