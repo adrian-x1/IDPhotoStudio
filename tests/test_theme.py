@@ -1,6 +1,11 @@
 import importlib
 import importlib.util
+from pathlib import Path
+import shutil
+import sys
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 
 def relative_luminance(color: str) -> float:
@@ -84,6 +89,31 @@ class ThemeTests(unittest.TestCase):
         for path in theme.CONTROL_ICON_PATHS.values():
             with self.subTest(icon=path.name):
                 self.assertTrue(path.is_file())
+
+    def test_control_icons_resolve_from_pyinstaller_bundle(self) -> None:
+        theme = self.load_theme()
+
+        with TemporaryDirectory() as bundle_root:
+            bundled_icon_dir = Path(bundle_root) / "ui" / "icons"
+            bundled_icon_dir.mkdir(parents=True)
+            for source_path in theme.CONTROL_ICON_PATHS.values():
+                shutil.copy2(source_path, bundled_icon_dir / source_path.name)
+
+            spec = importlib.util.spec_from_file_location(
+                "ui._bundled_theme_test",
+                theme.__file__,
+            )
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            bundled_theme = importlib.util.module_from_spec(spec)
+            with patch.object(sys, "_MEIPASS", bundle_root, create=True):
+                spec.loader.exec_module(bundled_theme)
+
+            self.assertEqual(bundled_theme._ICON_DIR, bundled_icon_dir)
+            self.assertEqual(len(bundled_theme.CONTROL_ICON_PATHS), 4)
+            for path in bundled_theme.CONTROL_ICON_PATHS.values():
+                with self.subTest(icon=path.name):
+                    self.assertTrue(path.is_file())
 
     def test_stylesheet_keeps_a_one_pixel_amber_focus_state(self) -> None:
         theme = self.load_theme()

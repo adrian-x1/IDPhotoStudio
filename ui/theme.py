@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
@@ -29,7 +30,15 @@ COLORS = {
     "warning_text": "#F0C674",
 }
 
-_ICON_DIR = Path(__file__).resolve().parent / "icons"
+
+def _resource_root() -> Path:
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root is not None:
+        return Path(bundle_root)
+    return Path(__file__).resolve().parents[1]
+
+
+_ICON_DIR = _resource_root() / "ui" / "icons"
 CONTROL_ICON_PATHS = {
     "chevron_down": _ICON_DIR / "chevron-down.svg",
     "spin_up": _ICON_DIR / "spin-up.svg",
