@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 import unittest
 
+from core import crop as crop_module
 from core.crop import (
+    CropBox,
     EYE_LINE,
     K,
     LOWER_EDGE_LIFT_RATIO,
@@ -107,6 +109,27 @@ class CropGeometryTests(unittest.TestCase):
 
         self.assertFalse(result.insufficient_space)
         self.assertTrue(result.insufficient_resolution)
+
+    def test_manual_crop_reuses_core_resolution_requirement(self) -> None:
+        check_resolution = getattr(
+            crop_module,
+            "is_insufficient_resolution",
+            None,
+        )
+        self.assertIsNotNone(check_resolution)
+        if check_resolution is None:
+            return
+
+        target = TargetSize(25, 35)
+        self.assertFalse(
+            check_resolution(CropBox(0, 0, 295, 413), target)
+        )
+        self.assertTrue(
+            check_resolution(CropBox(0, 0, 294, 413), target)
+        )
+        self.assertTrue(
+            check_resolution(CropBox(0, 0, 295, 412), target)
+        )
 
 
 if __name__ == "__main__":

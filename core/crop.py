@@ -59,6 +59,17 @@ class CropResult:
     insufficient_resolution: bool
 
 
+def is_insufficient_resolution(
+    box: CropBox,
+    target_size: TargetSize,
+) -> bool:
+    """Return whether a crop lacks pixels for its 300 DPI target size."""
+    return (
+        box.width < mm_to_px(target_size.width_mm)
+        or box.height < mm_to_px(target_size.height_mm)
+    )
+
+
 def calculate_crop_box(
     face: FaceGeometry,
     image_width: float,
@@ -100,12 +111,8 @@ def calculate_crop_box(
         bottom=top + crop_height,
     )
 
-    insufficient_resolution = (
-        box.width < mm_to_px(target_size.width_mm)
-        or box.height < mm_to_px(target_size.height_mm)
-    )
     return CropResult(
         box=box,
         insufficient_space=insufficient_space,
-        insufficient_resolution=insufficient_resolution,
+        insufficient_resolution=is_insufficient_resolution(box, target_size),
     )
