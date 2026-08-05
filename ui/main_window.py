@@ -12,6 +12,7 @@ from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtGui import QCloseEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -46,6 +47,7 @@ from ui.matting_worker import MattingWorker
 
 ORIGINAL_BACKGROUND = "保持原底"
 EMPTY_COUNT_TEXT = "共 — 张"
+DEFAULT_SPACING_MM = 1.0
 
 
 def _resource_root() -> Path:
@@ -107,6 +109,16 @@ class ImagePreview(QLabel):
 
 class MainWindow(QMainWindow):
     """Coordinate import, automatic crop, and live 4R sheet preview."""
+
+    def mousePressEvent(self, event) -> None:
+        """Clicking empty space drops spinbox focus so its edit ring clears."""
+        self._clear_parameter_focus()
+        super().mousePressEvent(event)
+
+    def _clear_parameter_focus(self) -> None:
+        focused = QApplication.focusWidget()
+        if isinstance(focused, QDoubleSpinBox):
+            focused.clearFocus()
 
     def __init__(self) -> None:
         super().__init__()
@@ -208,6 +220,12 @@ class MainWindow(QMainWindow):
         self.original_background_radio.setChecked(True)
         first_row.addStretch(1)
 
+        self.reset_spacing_button = QPushButton("重置")
+        self.reset_spacing_button.setAccessibleName("重置间距和边距为默认值")
+        self.reset_spacing_button.setToolTip("间距和边距恢复为 1.0mm")
+        second_row.addWidget(self.reset_spacing_button)
+        second_row.addSpacing(16)
+
         second_row.addWidget(QLabel("间距"))
         self.gap_spin = self._millimetre_spinbox("照片间距")
         second_row.addWidget(self.gap_spin)
@@ -274,13 +292,20 @@ class MainWindow(QMainWindow):
         spinbox.setRange(0.0, 20.0)
         spinbox.setDecimals(1)
         spinbox.setSingleStep(0.5)
-        spinbox.setValue(1.0)
+        spinbox.setValue(DEFAULT_SPACING_MM)
         spinbox.setAccessibleName(accessible_name)
         return spinbox
+
+    def _reset_spacing(self) -> None:
+        """Restore gap and margin to their defaults, refreshing layout once."""
+        self.gap_spin.setValue(DEFAULT_SPACING_MM)
+        self.margin_spin.setValue(DEFAULT_SPACING_MM)
+        self._clear_parameter_focus()
 
     def _connect_signals(self) -> None:
         self.import_button.clicked.connect(self._choose_image)
         self.reset_crop_button.clicked.connect(self.crop_view.reset_to_auto)
+        self.reset_spacing_button.clicked.connect(self._reset_spacing)
         self.crop_view.cropBoxChanged.connect(self._on_crop_box_changed)
         self.crop_view.interactionFinished.connect(
             self._on_crop_interaction_finished

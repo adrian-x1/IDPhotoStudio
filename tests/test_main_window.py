@@ -356,6 +356,28 @@ class MainWindowTests(unittest.TestCase):
             self.window.cropped_original.getpixel((0, 0)),
         )
 
+    def test_reset_button_restores_default_spacing_and_refreshes_layout(self) -> None:
+        self.load_portrait()
+        self.window.gap_spin.setValue(6.5)
+        self.window.margin_spin.setValue(4.0)
+        reduced_count = self.window.count_label.text()
+
+        self.window.reset_spacing_button.click()
+
+        self.assertEqual(self.window.gap_spin.value(), 1.0)
+        self.assertEqual(self.window.margin_spin.value(), 1.0)
+        self.assertEqual(self.window.count_label.text(), "共 12 张")
+        self.assertNotEqual(self.window.count_label.text(), reduced_count)
+
+    def test_clicking_empty_space_drops_spinbox_focus(self) -> None:
+        self.load_portrait()
+        self.window.gap_spin.setFocus()
+        self.assertTrue(self.window.gap_spin.hasFocus())
+
+        self.window._clear_parameter_focus()
+
+        self.assertFalse(self.window.gap_spin.hasFocus())
+
 
 if __name__ == "__main__":
     unittest.main()
