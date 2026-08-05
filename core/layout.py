@@ -66,8 +66,8 @@ def solve_layout(
         candidates,
         key=lambda result: (
             result.count,
-            result.paper_width_mm > result.paper_height_mm,
             not result.photo_rotated,
+            result.paper_width_mm > result.paper_height_mm,
             result.columns,
         ),
     )
