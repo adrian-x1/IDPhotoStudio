@@ -241,9 +241,10 @@ idphoto/
 │   ├── crop.py              # 裁剪框计算（K + EYE_LINE 两参数）
 │   ├── matting.py           # rembg 抠图 + 换底 + alpha 修补
 │   ├── layout.py            # solve_layout + 网格合成
-│   └── printing.py          # QPrinter / PDF / PNG 导出
+│   └── export.py            # 纯 Pillow 的 PNG / PDF 导出
 ├── ui/
 │   ├── main_window.py
+│   ├── printing.py          # QPrinter 直接打印
 │   ├── crop_view.py         # 可拖拽裁剪框
 │   └── brush_view.py        # alpha 修补画笔
 ├── assets/models/
@@ -254,6 +255,8 @@ idphoto/
 ├── requirements.txt
 └── build.spec
 ```
+
+导出与打印按依赖边界拆分：`core/export.py` 只使用 Pillow，`ui/printing.py` 承载 QPrinter，确保 `core/` 不引入 PySide6。
 
 `core/` 里不许出现任何 PySide6 import，保证核心逻辑能脱离界面在 Mac 上跑单元测试。
 

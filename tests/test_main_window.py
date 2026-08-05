@@ -30,6 +30,7 @@ from core.crop import (
 )
 from core.layout import compose_sheet
 from ui.main_window import IMAGE_FILE_FILTER, SUPPORTED_IMAGE_SUFFIXES, MainWindow
+from ui.printing import PrintOutcome
 
 
 class MainWindowTests(unittest.TestCase):
@@ -577,7 +578,7 @@ class MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window.margin_spin.hasFocus())
 
-    def test_header_reserves_stage_three_actions_without_buttons(self) -> None:
+    def test_header_contains_stage_three_output_actions(self) -> None:
         header = getattr(self.window, "header_panel", None)
         output_container = getattr(self.window, "output_actions_container", None)
         output_layout = getattr(self.window, "output_actions_layout", None)
@@ -589,8 +590,12 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(header.height(), 56)
         self.assertTrue(output_container.isVisible())
         self.assertGreaterEqual(output_container.width(), 240)
-        self.assertEqual(output_layout.count(), 0)
-        self.assertFalse(separator.isVisible())
+        self.assertEqual(output_layout.count(), 3)
+        self.assertEqual(
+            [output_layout.itemAt(index).widget().text() for index in range(3)],
+            ["导出 PNG", "导出 PDF", "打印"],
+        )
+        self.assertTrue(separator.isVisible())
 
         self.window.resize(1040, 680)
         self.app.processEvents()
@@ -602,6 +607,103 @@ class MainWindowTests(unittest.TestCase):
                 )
             )
         )
+
+    def test_output_actions_enable_only_while_a_sheet_exists(self) -> None:
+        buttons = (
+            self.window.export_png_button,
+            self.window.export_pdf_button,
+            self.window.print_button,
+        )
+        self.assertTrue(all(not button.isEnabled() for button in buttons))
+
+        self.assertTrue(self.load_portrait())
+        self.assertTrue(all(button.isEnabled() for button in buttons))
+
+        self.window.margin_spin.setMaximum(100)
+        self.window.margin_spin.setValue(100)
+        self.app.processEvents()
+        self.assertIsNone(self.window.sheet_image)
+        self.assertTrue(all(not button.isEnabled() for button in buttons))
+
+    def test_export_dialogs_use_spec_names_and_cancel_without_exporting(self) -> None:
+        self.assertTrue(self.load_portrait())
+        png_path = str(Path(self.temp_dir.name) / "一寸_4R.png")
+        pdf_path = str(Path(self.temp_dir.name) / "一寸_4R.pdf")
+
+        with (
+            patch(
+                "ui.main_window.QFileDialog.getSaveFileName",
+                side_effect=((png_path, ""), (pdf_path, "")),
+            ) as save_dialog,
+            patch("ui.main_window.export_png") as export_png,
+            patch("ui.main_window.export_pdf") as export_pdf,
+        ):
+            self.window.export_png_button.click()
+            self.window.export_pdf_button.click()
+
+        self.assertEqual(save_dialog.call_args_list[0].args[2], "一寸_4R.png")
+        self.assertEqual(save_dialog.call_args_list[1].args[2], "一寸_4R.pdf")
+        export_png.assert_called_once_with(self.window.sheet_image, png_path)
+        export_pdf.assert_called_once_with(self.window.sheet_image, pdf_path)
+
+        with (
+            patch(
+                "ui.main_window.QFileDialog.getSaveFileName",
+                return_value=("", ""),
+            ),
+            patch("ui.main_window.export_png") as export_png,
+            patch("ui.main_window.export_pdf") as export_pdf,
+        ):
+            self.window.export_png_button.click()
+            self.window.export_pdf_button.click()
+
+        export_png.assert_not_called()
+        export_pdf.assert_not_called()
+
+    def test_export_io_failures_are_reported_in_the_status_bar(self) -> None:
+        self.assertTrue(self.load_portrait())
+        cases = (
+            (self.window.export_png_button, "export_png", PermissionError("denied")),
+            (self.window.export_pdf_button, "export_pdf", IOError("disk full")),
+        )
+
+        for button, function_name, error in cases:
+            with self.subTest(function=function_name):
+                with (
+                    patch(
+                        "ui.main_window.QFileDialog.getSaveFileName",
+                        return_value=(str(Path(self.temp_dir.name) / "output"), ""),
+                    ),
+                    patch(f"ui.main_window.{function_name}", side_effect=error),
+                ):
+                    button.click()
+                self.assertIn("导出", self.window.status_label.text())
+                self.assertIn(str(error), self.window.status_label.text())
+
+    def test_print_outcomes_update_status_without_overwriting_cancel(self) -> None:
+        self.assertTrue(self.load_portrait())
+
+        with patch(
+            "ui.main_window.print_sheet",
+            return_value=PrintOutcome.NO_PRINTER,
+        ):
+            self.window.print_button.click()
+        self.assertEqual(self.window.status_label.text(), "没有可用打印机")
+
+        previous_status = self.window.status_label.text()
+        with patch(
+            "ui.main_window.print_sheet",
+            return_value=PrintOutcome.CANCELLED,
+        ):
+            self.window.print_button.click()
+        self.assertEqual(self.window.status_label.text(), previous_status)
+
+        with patch(
+            "ui.main_window.print_sheet",
+            return_value=PrintOutcome.PRINTED,
+        ):
+            self.window.print_button.click()
+        self.assertEqual(self.window.status_label.text(), "已发送到打印机")
 
     def test_darkroom_workspace_uses_fixed_parameters_and_weighted_previews(self) -> None:
         parameters_panel = getattr(self.window, "parameters_panel", None)
