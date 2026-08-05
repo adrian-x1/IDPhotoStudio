@@ -39,7 +39,7 @@ class CommandLinePipelineTests(unittest.TestCase):
             self.assertEqual(output_path, output_dir / "portrait_一寸_蓝底.png")
             self.assertTrue(output_path.is_file())
             with Image.open(output_path) as sheet:
-                self.assertEqual(sheet.size, (mm_to_px(152), mm_to_px(102)))
+                self.assertEqual(sheet.size, (mm_to_px(102), mm_to_px(152)))
                 self.assertAlmostEqual(sheet.info["dpi"][0], 300, delta=0.1)
                 self.assertAlmostEqual(sheet.info["dpi"][1], 300, delta=0.1)
 
