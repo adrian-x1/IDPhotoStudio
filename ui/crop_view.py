@@ -16,9 +16,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QStyle, QStyleOption, QWidget
 
 from core.crop import CropBox
-from ui.theme import COLORS
-
-
 class CropView(QWidget):
     """Show an image with a movable, corner-resizable crop rectangle."""
 
@@ -26,9 +23,12 @@ class CropView(QWidget):
     interactionFinished = Signal(object)
 
     HANDLE_HIT_RADIUS = 16.0
-    HANDLE_VISUAL_RADIUS = 5.0
     MIN_CROP_VIEW_SIZE = 48.0
-    EMPTY_TEXT = "拖入照片到窗口任意位置\n或点击右上角导入照片"
+    MASK_OPACITY = 0.55
+    FRAME_OPACITY = 0.70
+    CORNER_MARK_LENGTH = 18.0
+    CORNER_MARK_WIDTH = 2.5
+    EMPTY_TEXT = "拖入照片，或点击右上导入"
 
     _CORNER_SIGNS = {
         "top_left": (-1, -1),
@@ -136,7 +136,7 @@ class CropView(QWidget):
             return
 
         crop_rect = self._crop_rect_widget()
-        shade = QColor(0, 0, 0, 105)
+        shade = QColor(0, 0, 0, round(255 * self.MASK_OPACITY))
         painter.fillRect(
             QRectF(image_rect.left(), image_rect.top(), image_rect.width(), crop_rect.top() - image_rect.top()),
             shade,
@@ -154,23 +154,41 @@ class CropView(QWidget):
             shade,
         )
 
-        painter.setPen(QPen(QColor(0, 0, 0, 180), 4))
-        painter.drawRect(crop_rect)
-        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        frame_color = QColor(
+            255,
+            255,
+            255,
+            round(255 * self.FRAME_OPACITY),
+        )
+        painter.setPen(QPen(frame_color, 1))
         painter.drawRect(crop_rect)
 
-        handle_color = QColor(COLORS["primary"])
-        painter.setPen(QPen(QColor(255, 255, 255), 2))
-        painter.setBrush(handle_color)
-        radius = self.HANDLE_VISUAL_RADIUS
-        for point in self._handle_points().values():
-            painter.drawRect(
-                QRectF(
-                    point.x() - radius,
-                    point.y() - radius,
-                    radius * 2,
-                    radius * 2,
-                )
+        corner_pen = QPen(QColor(255, 255, 255), self.CORNER_MARK_WIDTH)
+        corner_pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+        corner_pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+        painter.setPen(corner_pen)
+        directions = {
+            "top_left": (1, 1),
+            "top_right": (-1, 1),
+            "bottom_right": (-1, -1),
+            "bottom_left": (1, -1),
+        }
+        for name, point in self._handle_points().items():
+            horizontal, vertical = directions[name]
+            painter.drawLine(
+                point,
+                QPointF(
+                    point.x() + horizontal * self.CORNER_MARK_LENGTH,
+                    point.y(),
+                ),
+            )
+            painter.drawLine(
+                point,
+                QPointF(
+                    point.x(),
+                    point.y() + vertical * self.CORNER_MARK_LENGTH,
+                ),
             )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:

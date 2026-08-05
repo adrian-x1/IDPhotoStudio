@@ -4,7 +4,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
 
@@ -134,6 +134,30 @@ class CropViewTests(unittest.TestCase):
             2 / 3,
         )
         self.assertFalse(self.view.pixmap().isNull())
+
+    def test_crop_overlay_uses_dark_mask_and_white_corner_marks(self) -> None:
+        rendered = self.view.grab().toImage()
+        outside = rendered.pixelColor(self.image_point(100, 100))
+        inside = rendered.pixelColor(self.image_point(400, 480))
+        corner = self.image_point(200, 200)
+        corner_mark = rendered.pixelColor(corner)
+        diagonal_inside = rendered.pixelColor(corner + QPoint(3, 3))
+
+        self.assertAlmostEqual(CropView.MASK_OPACITY, 0.55)
+        self.assertAlmostEqual(CropView.FRAME_OPACITY, 0.70)
+        self.assertEqual(CropView.CORNER_MARK_LENGTH, 18.0)
+        self.assertEqual(CropView.CORNER_MARK_WIDTH, 2.5)
+        for actual, expected in zip(outside.getRgb()[:3], (36, 45, 54)):
+            self.assertAlmostEqual(actual, expected, delta=2)
+        self.assertEqual(inside.getRgb()[:3], (80, 100, 120))
+        self.assertGreater(min(corner_mark.getRgb()[:3]), 230)
+        self.assertEqual(diagonal_inside.getRgb()[:3], (80, 100, 120))
+
+    def test_empty_state_uses_short_darkroom_instruction(self) -> None:
+        self.assertEqual(
+            CropView.EMPTY_TEXT,
+            "拖入照片，或点击右上导入",
+        )
 
 
 if __name__ == "__main__":
