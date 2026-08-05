@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec.bak
+.DS_Store
+assets/models/*.onnx
+out/
