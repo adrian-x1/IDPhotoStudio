@@ -9,7 +9,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -21,7 +22,7 @@ from core.crop import (
     calculate_crop_box,
 )
 from core.layout import compose_sheet
-from ui.main_window import MainWindow
+from ui.main_window import IMAGE_FILE_FILTER, SUPPORTED_IMAGE_SUFFIXES, MainWindow
 
 
 class MainWindowTests(unittest.TestCase):
@@ -59,6 +60,38 @@ class MainWindowTests(unittest.TestCase):
             self.app.processEvents()
             QTest.qWait(10)
 
+    @staticmethod
+    def mime_with_urls(*urls: QUrl) -> QMimeData:
+        mime = QMimeData()
+        mime.setUrls(list(urls))
+        return mime
+
+    @classmethod
+    def drag_enter_event(cls, *urls: QUrl) -> QDragEnterEvent:
+        mime = cls.mime_with_urls(*urls)
+        event = QDragEnterEvent(
+            QPoint(12, 12),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        event._test_mime_data = mime
+        return event
+
+    @classmethod
+    def drop_event(cls, *urls: QUrl) -> QDropEvent:
+        mime = cls.mime_with_urls(*urls)
+        event = QDropEvent(
+            QPointF(12, 12),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        event._test_mime_data = mime
+        return event
+
     def test_default_original_background_loads_all_three_previews(self) -> None:
         self.assertEqual(self.window.spec_combo.currentText(), "一寸")
         self.assertTrue(self.window.original_background_radio.isChecked())
@@ -75,6 +108,84 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.count_label.text(), "共 12 张")
         self.assertEqual(self.window.status_label.text(), "保持原底，未执行抠图")
         extract_foreground.assert_not_called()
+
+    def test_image_suffixes_are_shared_with_the_file_dialog_filter(self) -> None:
+        expected = (
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".bmp",
+            ".tif",
+            ".tiff",
+        )
+
+        self.assertEqual(SUPPORTED_IMAGE_SUFFIXES, expected)
+        self.assertEqual(
+            IMAGE_FILE_FILTER,
+            "照片 (*.jpg *.jpeg *.png *.webp *.bmp *.tif *.tiff)",
+        )
+
+    def test_drag_enter_only_accepts_supported_local_files(self) -> None:
+        valid = self.drag_enter_event(QUrl.fromLocalFile(str(self.image_path)))
+        self.window.dragEnterEvent(valid)
+        self.assertTrue(valid.isAccepted())
+
+        invalid_urls = (
+            QUrl.fromLocalFile(str(Path(self.temp_dir.name))),
+            QUrl.fromLocalFile(str(Path(self.temp_dir.name) / "notes.txt")),
+            QUrl("https://example.com/portrait.jpg"),
+        )
+        for url in invalid_urls:
+            with self.subTest(url=url.toString()):
+                event = self.drag_enter_event(url)
+                self.window.dragEnterEvent(event)
+                self.assertFalse(event.isAccepted())
+
+    def test_drop_loads_only_the_first_local_image(self) -> None:
+        second_path = Path(self.temp_dir.name) / "second.png"
+        Image.new("RGB", (500, 700), (200, 30, 40)).save(second_path)
+        event = self.drop_event(
+            QUrl.fromLocalFile(str(self.image_path)),
+            QUrl.fromLocalFile(str(second_path)),
+        )
+
+        with (
+            patch("ui.main_window.detect_face", return_value=self.face),
+            patch.object(
+                self.window,
+                "load_image",
+                wraps=self.window.load_image,
+            ) as load_image,
+        ):
+            self.window.dropEvent(event)
+
+        self.assertTrue(event.isAccepted())
+        load_image.assert_called_once_with(self.image_path)
+        self.assertEqual(self.window.source_image.size, (1000, 1200))
+
+    def test_drop_ignores_invalid_first_item_and_accepts_uppercase_suffix(self) -> None:
+        text_path = Path(self.temp_dir.name) / "notes.txt"
+        text_path.write_text("not a photo", encoding="utf-8")
+        invalid = self.drop_event(
+            QUrl.fromLocalFile(str(text_path)),
+            QUrl.fromLocalFile(str(self.image_path)),
+        )
+
+        with patch.object(self.window, "load_image") as load_image:
+            self.window.dropEvent(invalid)
+
+        self.assertFalse(invalid.isAccepted())
+        load_image.assert_not_called()
+
+        uppercase_path = Path(self.temp_dir.name) / "PORTRAIT.JPG"
+        Image.new("RGB", (640, 800), (20, 100, 160)).save(uppercase_path)
+        valid = self.drop_event(QUrl.fromLocalFile(str(uppercase_path)))
+        with patch("ui.main_window.detect_face", return_value=self.face):
+            self.window.dropEvent(valid)
+
+        self.assertTrue(valid.isAccepted())
+        self.assertEqual(self.window.source_image.size, (640, 800))
 
     def test_spec_spacing_margin_and_cut_lines_refresh_layout_immediately(self) -> None:
         self.assertTrue(self.load_portrait())

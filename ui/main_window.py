@@ -9,8 +9,14 @@ import sys
 import numpy as np
 from PIL import Image, ImageOps
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QThreadPool, Qt
-from PySide6.QtGui import QCloseEvent, QPixmap, QResizeEvent
+from PySide6.QtCore import QMimeData, QThreadPool, Qt
+from PySide6.QtGui import (
+    QCloseEvent,
+    QDragEnterEvent,
+    QDropEvent,
+    QPixmap,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -48,6 +54,18 @@ from ui.matting_worker import MattingWorker
 ORIGINAL_BACKGROUND = "保持原底"
 EMPTY_COUNT_TEXT = "共 — 张"
 DEFAULT_SPACING_MM = 1.0
+SUPPORTED_IMAGE_SUFFIXES = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+)
+IMAGE_FILE_FILTER = "照片 (" + " ".join(
+    f"*{suffix}" for suffix in SUPPORTED_IMAGE_SUFFIXES
+) + ")"
 
 
 def _resource_root() -> Path:
@@ -60,6 +78,18 @@ def _resource_root() -> Path:
 def _load_specs() -> dict[str, dict[str, int]]:
     path = _resource_root() / "specs.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _first_supported_local_image(mime_data: QMimeData) -> Path | None:
+    if not mime_data.hasUrls():
+        return None
+    urls = mime_data.urls()
+    if not urls or not urls[0].isLocalFile():
+        return None
+    path = Path(urls[0].toLocalFile())
+    if not path.is_file() or path.suffix.lower() not in SUPPORTED_IMAGE_SUFFIXES:
+        return None
+    return path
 
 
 class ImagePreview(QLabel):
@@ -140,6 +170,7 @@ class MainWindow(QMainWindow):
         self._thread_pool.setMaxThreadCount(1)
 
         self.setWindowTitle("证件照排版")
+        self.setAcceptDrops(True)
         self.setMinimumSize(900, 620)
         self.resize(1200, 760)
         self._build_ui()
@@ -327,10 +358,24 @@ class MainWindow(QMainWindow):
             self,
             "导入照片",
             "",
-            "照片 (*.jpg *.jpeg *.png *.webp *.bmp *.tif *.tiff)",
+            IMAGE_FILE_FILTER,
         )
         if path:
             self.load_image(path)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if _first_supported_local_image(event.mimeData()) is not None:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        path = _first_supported_local_image(event.mimeData())
+        if path is None:
+            event.ignore()
+            return
+        self.load_image(path)
+        event.acceptProposedAction()
 
     def load_image(self, path: str | Path) -> bool:
         """Load one image and update the three panes; return whether crop succeeded."""
