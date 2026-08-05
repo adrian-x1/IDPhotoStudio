@@ -337,8 +337,11 @@ QRadioButton#backgroundOriginal::indicator {{
 QRadioButton#backgroundWhite::indicator,
 QRadioButton#backgroundBlue::indicator,
 QRadioButton#backgroundRed::indicator {{
+    subcontrol-origin: content;
+    subcontrol-position: center;
     width: 12px;
     height: 12px;
+    margin: 0;
     border-radius: 6px;
     border: 1px solid rgba(232, 230, 227, 90);
 }}

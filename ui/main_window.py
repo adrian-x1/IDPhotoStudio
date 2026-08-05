@@ -261,9 +261,12 @@ class MainWindow(QMainWindow):
         self.background_group = QButtonGroup(self)
         self.original_background_radio = QRadioButton("原底")
         self.original_background_radio.setAccessibleName(ORIGINAL_BACKGROUND)
-        self.white_background_radio = QRadioButton("白")
-        self.blue_background_radio = QRadioButton("蓝")
-        self.red_background_radio = QRadioButton("红")
+        self.white_background_radio = QRadioButton("")
+        self.white_background_radio.setAccessibleName("白底")
+        self.blue_background_radio = QRadioButton("")
+        self.blue_background_radio.setAccessibleName("蓝底")
+        self.red_background_radio = QRadioButton("")
+        self.red_background_radio.setAccessibleName("红底")
         background_radios = (
             (self.original_background_radio, "backgroundOriginal"),
             (self.white_background_radio, "backgroundWhite"),

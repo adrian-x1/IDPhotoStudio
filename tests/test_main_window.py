@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QGraphicsDropShadowEffect,
     QRadioButton,
+    QStyle,
+    QStyleOptionButton,
 )
 
 from core.crop import (
@@ -153,6 +155,35 @@ class MainWindowTests(unittest.TestCase):
             with self.subTest(radio=radio.objectName()):
                 self.assertIsInstance(radio, QRadioButton)
                 self.assertTrue(radio.property("segment"))
+
+    def test_colored_background_segments_show_only_centered_accessible_dots(self) -> None:
+        colored_radios = (
+            (self.window.white_background_radio, "白底"),
+            (self.window.blue_background_radio, "蓝底"),
+            (self.window.red_background_radio, "红底"),
+        )
+
+        for radio, accessible_name in colored_radios:
+            with self.subTest(radio=radio.objectName()):
+                self.assertEqual(radio.text(), "")
+                self.assertEqual(radio.accessibleName(), accessible_name)
+                option = QStyleOptionButton()
+                radio.initStyleOption(option)
+                indicator = radio.style().subElementRect(
+                    QStyle.SubElement.SE_RadioButtonIndicator,
+                    option,
+                    radio,
+                )
+                self.assertAlmostEqual(
+                    indicator.center().x(),
+                    radio.rect().center().x(),
+                    delta=1,
+                )
+                self.assertAlmostEqual(
+                    indicator.center().y(),
+                    radio.rect().center().y(),
+                    delta=1,
+                )
 
     def test_drag_enter_only_accepts_supported_local_files(self) -> None:
         valid = self.drag_enter_event(QUrl.fromLocalFile(str(self.image_path)))
