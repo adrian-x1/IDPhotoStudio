@@ -12,7 +12,12 @@ from PIL import Image
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QButtonGroup, QPushButton, QRadioButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QGraphicsDropShadowEffect,
+    QRadioButton,
+)
 
 from core.crop import (
     CropBox,
@@ -138,6 +143,11 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(
             [radio.objectName() for radio in radios],
             ["backgroundOriginal", "backgroundWhite", "backgroundBlue", "backgroundRed"],
+        )
+        self.assertEqual(self.window.original_background_radio.text(), "原底")
+        self.assertEqual(
+            self.window.original_background_radio.accessibleName(),
+            "保持原底",
         )
         for radio in radios:
             with self.subTest(radio=radio.objectName()):
@@ -536,7 +546,7 @@ class MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window.margin_spin.hasFocus())
 
-    def test_claude_layout_reserves_stage_three_actions(self) -> None:
+    def test_header_reserves_stage_three_actions_without_buttons(self) -> None:
         header = getattr(self.window, "header_panel", None)
         output_container = getattr(self.window, "output_actions_container", None)
         output_layout = getattr(self.window, "output_actions_layout", None)
@@ -545,54 +555,61 @@ class MainWindowTests(unittest.TestCase):
         self.assertIsNotNone(output_container)
         self.assertIsNotNone(output_layout)
         self.assertIsNotNone(separator)
-        self.assertFalse(output_container.isVisible())
+        self.assertEqual(header.height(), 56)
+        self.assertTrue(output_container.isVisible())
+        self.assertGreaterEqual(output_container.width(), 240)
+        self.assertEqual(output_layout.count(), 0)
         self.assertFalse(separator.isVisible())
 
-        future_buttons = [
-            QPushButton("导出 PNG"),
-            QPushButton("导出 PDF"),
-            QPushButton("打印"),
-        ]
-        for button in future_buttons:
-            output_layout.addWidget(button)
-        separator.show()
-        output_container.show()
-        self.window.resize(900, 620)
+        self.window.resize(1040, 680)
         self.app.processEvents()
-
-        import_rect = self.window.import_button.geometry()
-        import_top_left = self.window.import_button.mapTo(header, QPoint(0, 0))
-        import_rect.moveTopLeft(import_top_left)
-        for button in future_buttons:
-            top_left = button.mapTo(header, QPoint(0, 0))
-            bottom_right = button.mapTo(
-                header,
-                button.rect().bottomRight(),
+        self.assertTrue(
+            header.rect().contains(
+                self.window.import_button.mapTo(
+                    header,
+                    self.window.import_button.rect().bottomRight(),
+                )
             )
-            self.assertTrue(header.rect().contains(top_left))
-            self.assertTrue(header.rect().contains(bottom_right))
-            button_rect = button.geometry()
-            button_rect.moveTopLeft(top_left)
-            self.assertFalse(import_rect.intersects(button_rect))
+        )
 
-    def test_minimum_size_keeps_previews_and_parameters_readable(self) -> None:
+    def test_darkroom_workspace_uses_fixed_parameters_and_weighted_previews(self) -> None:
         parameters_panel = getattr(self.window, "parameters_panel", None)
         self.assertIsNotNone(parameters_panel)
-        self.window.resize(900, 620)
+        right_column = getattr(self.window, "right_column", None)
+        status_bar = getattr(self.window, "status_bar", None)
+        self.assertIsNotNone(right_column)
+        self.assertIsNotNone(status_bar)
+        self.assertEqual(self.window.minimumWidth(), 1040)
+        self.assertEqual(self.window.minimumHeight(), 680)
+
+        self.window.resize(1040, 680)
         self.app.processEvents()
 
-        self.assertGreaterEqual(self.window.crop_view.width(), 160)
-        self.assertGreaterEqual(self.window.crop_preview.width(), 280)
-        self.assertGreaterEqual(self.window.sheet_preview.width(), 280)
-        controls = (
+        self.assertEqual(parameters_panel.width(), 220)
+        preview_ratio = self.window.original_card.width() / right_column.width()
+        self.assertGreater(preview_ratio, 1.08)
+        self.assertLess(preview_ratio, 1.22)
+        self.assertLess(parameters_panel.x(), self.window.original_card.x())
+        self.assertLess(self.window.original_card.x(), right_column.x())
+        self.assertLess(self.window.crop_card.y(), self.window.sheet_card.y())
+        self.assertLessEqual(
+            abs(self.window.crop_card.height() - self.window.sheet_card.height()),
+            2,
+        )
+        self.assertEqual(status_bar.height(), 28)
+        self.assertIs(self.window.status_label.parentWidget(), status_bar)
+        self.assertIs(self.window.progress_bar.parentWidget(), status_bar)
+
+        vertically_ordered_controls = (
             self.window.spec_combo,
             self.window.original_background_radio,
-            self.window.red_background_radio,
             self.window.gap_spin,
             self.window.margin_spin,
             self.window.cut_lines_check,
+            self.window.reset_spacing_button,
         )
-        for control in controls:
+        y_positions = []
+        for control in vertically_ordered_controls:
             with self.subTest(control=control.accessibleName() or control.text()):
                 top_left = control.mapTo(parameters_panel, QPoint(0, 0))
                 bottom_right = control.mapTo(
@@ -601,6 +618,35 @@ class MainWindowTests(unittest.TestCase):
                 )
                 self.assertTrue(parameters_panel.rect().contains(top_left))
                 self.assertTrue(parameters_panel.rect().contains(bottom_right))
+                y_positions.append(top_left.y())
+        self.assertEqual(y_positions, sorted(y_positions))
+
+        radio_widths = [
+            radio.width()
+            for radio in (
+                self.window.original_background_radio,
+                self.window.white_background_radio,
+                self.window.blue_background_radio,
+                self.window.red_background_radio,
+            )
+        ]
+        self.assertLessEqual(max(radio_widths) - min(radio_widths), 1)
+
+    def test_sheet_count_uses_visual_labels_without_changing_count_contract(self) -> None:
+        self.assertTrue(self.load_portrait())
+
+        self.assertEqual(self.window.count_label.text(), "共 12 张")
+        self.assertTrue(self.window.count_label.isHidden())
+        self.assertEqual(self.window.count_number_label.text(), "12")
+        self.assertEqual(self.window.count_unit_label.text(), "张")
+        self.assertEqual(self.window.sheet_preview.objectName(), "paperPreview")
+
+        shadow = self.window.sheet_preview.graphicsEffect()
+        self.assertIsInstance(shadow, QGraphicsDropShadowEffect)
+        self.assertEqual(shadow.blurRadius(), 18.0)
+        self.assertEqual(shadow.offset().x(), 0.0)
+        self.assertEqual(shadow.offset().y(), 3.0)
+        self.assertAlmostEqual(shadow.color().alphaF(), 0.45, places=2)
 
 
 

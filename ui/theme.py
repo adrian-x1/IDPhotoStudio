@@ -118,6 +118,28 @@ QLabel#countBadge {{
     font-weight: 600;
 }}
 
+QLabel#countNumber {{
+    color: {COLORS["primary"]};
+    font-size: 64px;
+    font-weight: 700;
+}}
+
+QLabel#countUnit {{
+    color: {COLORS["muted_text"]};
+    font-size: 12px;
+}}
+
+QLabel#paperPreview {{
+    color: {COLORS["muted_text"]};
+    background: transparent;
+    border: 0;
+}}
+
+QFrame#statusBar {{
+    background: transparent;
+    border-top: 1px solid {COLORS["border"]};
+}}
+
 QLabel#warningLabel {{
     color: {COLORS["warning_text"]};
     background: {COLORS["warning_background"]};
@@ -284,6 +306,7 @@ QRadioButton[segment="true"] {{
     background: {COLORS["control"]};
     border: 1px solid {COLORS["border"]};
     border-radius: 0;
+    font-size: 11px;
 }}
 
 QRadioButton[segment="true"]:hover {{
