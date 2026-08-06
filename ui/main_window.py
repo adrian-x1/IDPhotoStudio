@@ -45,6 +45,7 @@ from core.crop import (
     FaceGeometry,
     TargetSize,
     calculate_crop_box,
+    integer_crop_bounds,
     is_insufficient_resolution,
     minimum_face_height_for_300dpi,
 )
@@ -398,7 +399,7 @@ class MainWindow(QMainWindow):
 
         self.original_card = self._preview_panel(
             "裁剪区域",
-            "拖动框或四角调整",
+            "拖动、滚轮或方向键微调",
             self.original_preview,
             self.reset_crop_button,
         )
@@ -713,7 +714,12 @@ class MainWindow(QMainWindow):
             self._crop_mode_note = "未检测到人脸，已进入手动裁剪模式"
             self.reset_crop_button.setEnabled(False)
 
-        self.crop_view.set_content(self.source_image, box, aspect_ratio)
+        self.crop_view.set_content(
+            self.source_image,
+            box,
+            aspect_ratio,
+            target_size=target,
+        )
         self._set_cropped_original(box)
         self._update_crop_warning(box, target)
         self._apply_background_selection()
@@ -730,8 +736,14 @@ class MainWindow(QMainWindow):
 
     def _set_cropped_original(self, box: CropBox) -> None:
         assert self.source_image is not None
+        target = self._current_target_size()
         self.cropped_original = self.source_image.crop(
-            (round(box.left), round(box.top), round(box.right), round(box.bottom))
+            integer_crop_bounds(
+                box,
+                self.source_image.width,
+                self.source_image.height,
+                target.width_mm / target.height_mm,
+            )
         )
 
     def _update_crop_warning(
@@ -742,8 +754,19 @@ class MainWindow(QMainWindow):
         warnings = list(self._input_warnings)
         if self._crop_space_warning:
             warnings.append(self._crop_space_warning)
+        assert self.source_image is not None
+        left, top, right, bottom = integer_crop_bounds(
+            box,
+            self.source_image.width,
+            self.source_image.height,
+            target.width_mm / target.height_mm,
+        )
+        integer_box = CropBox(0, 0, right - left, bottom - top)
         has_small_face_warning = "人脸太小，裁剪后像素不足" in warnings
-        if is_insufficient_resolution(box, target) and not has_small_face_warning:
+        if (
+            is_insufficient_resolution(integer_box, target)
+            and not has_small_face_warning
+        ):
             warnings.append("裁剪区域像素不足，放大后可能模糊")
         self._crop_warning = "；".join(warnings)
 

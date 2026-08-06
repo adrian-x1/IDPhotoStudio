@@ -7,15 +7,25 @@ from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QKeyEvent,
     QMouseEvent,
     QPaintEvent,
     QPainter,
     QPen,
     QPixmap,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import QStyle, QStyleOption, QWidget
 
-from core.crop import CropBox
+from core.crop import (
+    CropBox,
+    TargetSize,
+    integer_crop_bounds,
+    is_insufficient_resolution,
+)
+from ui.theme import COLORS
+
+
 class CropView(QWidget):
     """Show an image with a movable, corner-resizable crop rectangle."""
 
@@ -45,6 +55,7 @@ class CropView(QWidget):
         self._crop_box: CropBox | None = None
         self._automatic_box: CropBox | None = None
         self._aspect_ratio = 1.0
+        self._target_size: TargetSize | None = None
         self._drag_mode: str | None = None
         self._drag_start_point: QPointF | None = None
         self._drag_start_box: CropBox | None = None
@@ -78,12 +89,15 @@ class CropView(QWidget):
         image: Image.Image,
         automatic_box: CropBox,
         aspect_ratio: float,
+        *,
+        target_size: TargetSize | None = None,
     ) -> None:
         if aspect_ratio <= 0:
             raise ValueError("crop aspect ratio must be positive")
         self.set_image(image)
-        self._validate_box(automatic_box)
         self._aspect_ratio = aspect_ratio
+        self._target_size = target_size
+        self._validate_box(automatic_box)
         self._automatic_box = automatic_box
         self._crop_box = automatic_box
         self.update()
@@ -94,8 +108,38 @@ class CropView(QWidget):
         self._image_height = 0.0
         self._crop_box = None
         self._automatic_box = None
+        self._target_size = None
         self._drag_mode = None
         self.update()
+
+    @property
+    def crop_pixel_size(self) -> tuple[int, int] | None:
+        if self._crop_box is None:
+            return None
+        left, top, right, bottom = integer_crop_bounds(
+            self._crop_box,
+            round(self._image_width),
+            round(self._image_height),
+            self._aspect_ratio,
+        )
+        return right - left, bottom - top
+
+    @property
+    def crop_size_text(self) -> str:
+        size = self.crop_pixel_size
+        if size is None:
+            return ""
+        return f"{size[0]} × {size[1]}"
+
+    @property
+    def crop_size_is_insufficient(self) -> bool:
+        size = self.crop_pixel_size
+        if size is None or self._target_size is None:
+            return False
+        return is_insufficient_resolution(
+            CropBox(0, 0, size[0], size[1]),
+            self._target_size,
+        )
 
     def reset_to_auto(self) -> None:
         if self._automatic_box is None or self._crop_box == self._automatic_box:
@@ -190,6 +234,31 @@ class CropView(QWidget):
                     point.y() + vertical * self.CORNER_MARK_LENGTH,
                 ),
             )
+        self._paint_crop_size(painter, image_rect)
+
+    def _paint_crop_size(self, painter: QPainter, image_rect: QRectF) -> None:
+        text = self.crop_size_text
+        if not text:
+            return
+        metrics = painter.fontMetrics()
+        padding_x = 8.0
+        padding_y = 4.0
+        width = metrics.horizontalAdvance(text) + padding_x * 2
+        height = metrics.height() + padding_y * 2
+        badge = QRectF(
+            image_rect.right() - width - 8.0,
+            image_rect.bottom() - height - 8.0,
+            width,
+            height,
+        )
+        painter.fillRect(badge, QColor(COLORS["surface_muted"]))
+        color_name = (
+            COLORS["warning_text"]
+            if self.crop_size_is_insufficient
+            else COLORS["muted_text"]
+        )
+        painter.setPen(QColor(color_name))
+        painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, text)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if (
@@ -233,6 +302,85 @@ class CropView(QWidget):
         if self._drag_changed and self._crop_box is not None:
             self.interactionFinished.emit(self._crop_box)
         event.accept()
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._crop_box is None or event.angleDelta().y() == 0:
+            super().wheelEvent(event)
+            return
+        steps = event.angleDelta().y() / 120.0
+        base = (
+            1.005
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            else 1.02
+        )
+        self._apply_discrete_box(self._scale_box(base**steps))
+        event.accept()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        directions = {
+            Qt.Key.Key_Left: (-1.0, 0.0),
+            Qt.Key.Key_Right: (1.0, 0.0),
+            Qt.Key.Key_Up: (0.0, -1.0),
+            Qt.Key.Key_Down: (0.0, 1.0),
+        }
+        direction = directions.get(event.key())
+        if self._crop_box is None or direction is None:
+            super().keyPressEvent(event)
+            return
+        distance = (
+            10.0
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            else 1.0
+        )
+        self._apply_discrete_box(
+            self._move_by(direction[0] * distance, direction[1] * distance)
+        )
+        event.accept()
+
+    def _apply_discrete_box(self, box: CropBox) -> None:
+        if box == self._crop_box:
+            return
+        self._crop_box = box
+        self.update()
+        self.cropBoxChanged.emit(box)
+        self.interactionFinished.emit(box)
+
+    def _scale_box(self, factor: float) -> CropBox:
+        box = self._crop_box
+        assert box is not None
+        center_x = (box.left + box.right) / 2.0
+        center_y = (box.top + box.bottom) / 2.0
+        scale = self._image_scale()
+        minimum_width = (
+            self.MIN_CROP_VIEW_SIZE / scale * max(1.0, self._aspect_ratio)
+        )
+        maximum_width = min(
+            2.0 * min(center_x, self._image_width - center_x),
+            2.0
+            * min(center_y, self._image_height - center_y)
+            * self._aspect_ratio,
+        )
+        width = min(max(box.width * factor, minimum_width), maximum_width)
+        height = width / self._aspect_ratio
+        return CropBox(
+            center_x - width / 2.0,
+            center_y - height / 2.0,
+            center_x + width / 2.0,
+            center_y + height / 2.0,
+        )
+
+    def _move_by(self, delta_x: float, delta_y: float) -> CropBox:
+        box = self._crop_box
+        assert box is not None
+        left = min(
+            max(box.left + delta_x, 0.0),
+            self._image_width - box.width,
+        )
+        top = min(
+            max(box.top + delta_y, 0.0),
+            self._image_height - box.height,
+        )
+        return CropBox(left, top, left + box.width, top + box.height)
 
     def _update_drag(self, widget_point: QPointF) -> None:
         if (
@@ -383,3 +531,5 @@ class CropView(QWidget):
             or box.bottom > self._image_height
         ):
             raise ValueError("crop box must stay inside the image")
+        if abs(box.width / box.height - self._aspect_ratio) >= 1e-6:
+            raise ValueError("crop box must match the configured aspect ratio")

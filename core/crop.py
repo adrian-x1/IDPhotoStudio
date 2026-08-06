@@ -7,6 +7,7 @@ less clothing below the shoulders.  All three are adjustable empirical values.
 """
 
 from dataclasses import dataclass
+import math
 
 from core.units import mm_to_px
 
@@ -61,6 +62,40 @@ class CropResult:
     box: CropBox
     insufficient_space: bool
     insufficient_resolution: bool
+
+
+def integer_crop_bounds(
+    box: CropBox,
+    image_width: int,
+    image_height: int,
+    aspect_ratio: float,
+) -> tuple[int, int, int, int]:
+    """Quantize a floating crop to centered integer bounds at one-pixel granularity."""
+    if image_width <= 0 or image_height <= 0:
+        raise ValueError("image dimensions must be positive")
+    if aspect_ratio <= 0.0 or not math.isfinite(aspect_ratio):
+        raise ValueError("crop aspect ratio must be positive and finite")
+
+    width = min(max(1, round(box.width)), image_width)
+    maximum_width_for_height = max(
+        1,
+        math.floor((image_height + 0.499999999) * aspect_ratio),
+    )
+    width = min(width, maximum_width_for_height)
+    height = round(width / aspect_ratio)
+    while height > image_height and width > 1:
+        width -= 1
+        height = round(width / aspect_ratio)
+    if height <= 0 or height > image_height:
+        raise ValueError("crop aspect ratio cannot fit inside the image")
+
+    center_x = (box.left + box.right) / 2.0
+    center_y = (box.top + box.bottom) / 2.0
+    left = round(center_x - width / 2.0)
+    top = round(center_y - height / 2.0)
+    left = min(max(left, 0), image_width - width)
+    top = min(max(top, 0), image_height - height)
+    return left, top, left + width, top + height
 
 
 def is_insufficient_resolution(

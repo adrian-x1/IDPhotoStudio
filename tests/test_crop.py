@@ -12,6 +12,8 @@ from core.crop import (
     Point,
     TargetSize,
     calculate_crop_box,
+    integer_crop_bounds,
+    is_insufficient_resolution,
     minimum_face_height_for_300dpi,
 )
 from core.units import mm_to_px
@@ -143,6 +145,44 @@ class CropGeometryTests(unittest.TestCase):
             minimum_face_height_for_300dpi(target),
             expected,
         )
+
+    def test_integer_crop_uses_one_pixel_granularity_and_stays_inside_image(self) -> None:
+        box = CropBox(900.4, 700.4, 1550.8, 1693.1)
+
+        bounds = integer_crop_bounds(
+            box,
+            image_width=1800,
+            image_height=2000,
+            aspect_ratio=55 / 84,
+        )
+
+        left, top, right, bottom = bounds
+        width = right - left
+        height = bottom - top
+        self.assertEqual(width, round(box.width))
+        self.assertEqual(height, round(width / (55 / 84)))
+        self.assertLess(abs(width / height - 55 / 84), 1e-3)
+        self.assertGreaterEqual(left, 0)
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(right, 1800)
+        self.assertLessEqual(bottom, 2000)
+
+    def test_integer_three_inch_crop_does_not_snap_below_300dpi(self) -> None:
+        target = TargetSize(55, 84)
+        width = mm_to_px(target.width_mm)
+        box = CropBox(0, 0, width, width / (55 / 84))
+
+        left, top, right, bottom = integer_crop_bounds(
+            box,
+            image_width=2000,
+            image_height=2500,
+            aspect_ratio=55 / 84,
+        )
+        integer_box = CropBox(0, 0, right - left, bottom - top)
+
+        self.assertEqual(integer_box.width, 650)
+        self.assertEqual(integer_box.height, 993)
+        self.assertFalse(is_insufficient_resolution(integer_box, target))
 
 
 if __name__ == "__main__":

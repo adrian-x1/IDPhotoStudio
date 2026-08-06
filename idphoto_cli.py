@@ -8,7 +8,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageOps
 
-from core.crop import TargetSize, calculate_crop_box
+from core.crop import TargetSize, calculate_crop_box, integer_crop_bounds
 from core.detect import detect_face
 from core.layout import compose_sheet, solve_layout
 from core.matting import BACKGROUND_COLORS, replace_background
@@ -65,11 +65,11 @@ def build_sheet(
 
     box = crop_result.box
     cropped = image.crop(
-        (
-            round(box.left),
-            round(box.top),
-            round(box.right),
-            round(box.bottom),
+        integer_crop_bounds(
+            box,
+            image.width,
+            image.height,
+            target_size.width_mm / target_size.height_mm,
         )
     )
     finished_photo = replace_background(cropped, background)

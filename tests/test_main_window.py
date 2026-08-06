@@ -354,6 +354,15 @@ class MainWindowTests(unittest.TestCase):
         self.assertIn("裁剪区域像素不足", self.window.status_label.text())
         extract_foreground.assert_not_called()
 
+    def test_fractional_crop_uses_shared_integer_ratio_before_pillow_crop(self) -> None:
+        self.assertTrue(self.load_portrait())
+        box = CropBox(100.2, 100.2, 750.6, 1010.76)
+
+        self.window._set_cropped_original(box)
+
+        self.assertEqual(self.window.cropped_original.size, (650, 910))
+        self.assertLess(abs(650 / 910 - 25 / 35), 1e-3)
+
     def test_original_drag_uses_fast_sheet_preview_then_restores_full_quality(self) -> None:
         self.assertTrue(self.load_portrait())
         box = CropBox(210, 210, 610, 770)

@@ -6,7 +6,13 @@ from unittest.mock import patch
 from PIL import Image
 
 import idphoto_cli
-from core.crop import FaceGeometry, Point
+from core.crop import (
+    FaceGeometry,
+    Point,
+    TargetSize,
+    calculate_crop_box,
+    integer_crop_bounds,
+)
 from core.detect import FaceDetectionResult
 from core.units import mm_to_px
 
@@ -52,6 +58,17 @@ class CommandLinePipelineTests(unittest.TestCase):
         detected_image = detect_face.call_args.args[0]
         self.assertEqual(detected_image.shape, (1200, 1000, 3))
         self.assertEqual(replace_background.call_args.args[1], "蓝")
+        crop_result = calculate_crop_box(face, 1000, 1200, TargetSize(25, 35))
+        left, top, right, bottom = integer_crop_bounds(
+            crop_result.box,
+            1000,
+            1200,
+            25 / 35,
+        )
+        self.assertEqual(
+            replace_background.call_args.args[0].size,
+            (right - left, bottom - top),
+        )
 
 
 if __name__ == "__main__":
