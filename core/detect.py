@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 import sys
+import threading
 from typing import Optional, Sequence
 
 import mediapipe as mp
@@ -12,6 +13,10 @@ from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions
 import numpy as np
 
 from core.crop import FaceGeometry, Point
+
+
+_landmarker: Optional[FaceLandmarker] = None
+_landmarker_lock = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,26 @@ def _resolve_model_path() -> Path:
     else:
         base_path = Path(__file__).resolve().parents[1]
     return base_path / "assets" / "models" / "face_landmarker.task"
+
+
+def _get_landmarker() -> FaceLandmarker:
+    """Return the process-wide landmarker, creating it once under a lock."""
+    global _landmarker
+    with _landmarker_lock:
+        if _landmarker is None:
+            model_path = _resolve_model_path()
+            if not model_path.is_file():
+                raise FileNotFoundError(
+                    f"missing bundled face landmarker model: {model_path}"
+                )
+            options = FaceLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=str(model_path)),
+                num_faces=5,
+                output_face_blendshapes=False,
+                output_facial_transformation_matrixes=False,
+            )
+            _landmarker = FaceLandmarker.create_from_options(options)
+        return _landmarker
 
 
 def _absolute_point(landmark, image_width: int, image_height: int) -> Point:
@@ -192,22 +217,15 @@ def detect_face(rgb_image: np.ndarray) -> Optional[FaceDetectionResult]:
     if image_width <= 0 or image_height <= 0:
         return None
 
-    model_path = _resolve_model_path()
-    if not model_path.is_file():
-        raise FileNotFoundError(f"missing bundled face landmarker model: {model_path}")
-
-    options = FaceLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(model_path)),
-        num_faces=5,
-        output_face_blendshapes=False,
-        output_facial_transformation_matrixes=False,
-    )
     mp_image = mp.Image(
         image_format=mp.ImageFormat.SRGB,
         data=np.ascontiguousarray(rgb_image),
     )
-    with FaceLandmarker.create_from_options(options) as landmarker:
-        result = landmarker.detect(mp_image)
+    # Current imports run on the UI thread.  Keep calls serialized anyway:
+    # MediaPipe does not document concurrent detect() calls on one task object,
+    # and this also protects future moves of detection to worker threads.
+    with _landmarker_lock:
+        result = _get_landmarker().detect(mp_image)
 
     return _select_largest_face(
         result.face_landmarks,

@@ -12,7 +12,7 @@ import math
 from core.units import mm_to_px
 
 
-H = 1.8584
+H = 2.0177
 EYE_LINE = 0.42
 # Fraction of crop height shifted upward to raise the lower edge and reduce
 # clothing in frame.  This 5% default is an empirical starting value.

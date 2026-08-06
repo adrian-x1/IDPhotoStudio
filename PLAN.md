@@ -45,6 +45,8 @@ result = landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_a
 
 FaceLandmarker 的 landmark 坐标是**归一化坐标**（0-1），必须分别乘图像宽高转成绝对像素。当前使用 152（下巴）、10（额头）、468-477（两侧虹膜）和 33/263（两眼外角）。最多检测 5 张脸，按全部 landmark 外接矩形面积选择最大脸。
 
+FaceLandmarker 实例按进程缓存，避免每次导入照片都重复初始化和关闭；创建及 `detect()` 调用使用同一把锁串行化，不依赖 MediaPipe 对同一任务实例并发调用的未声明行为。
+
 FaceLandmarker 模型要提前下好（约 3.6MB，来自 Google CDN）：
 ```bash
 curl -L -o assets/models/face_landmarker.task \
@@ -141,7 +143,7 @@ def solve_layout(photo_w_mm, photo_h_mm, gap=1.0, margin=1.0, paper=(102,152)):
 缩放和纵向位置仍由两个独立参数控制：
 
 ```
-H = 1.8584        # 暂定值：裁剪高 = 额头到下巴的欧氏距离 × H，控制头的大小
+H = 2.0177        # 定稿值：裁剪高 = 额头到下巴的欧氏距离 × H，控制头的大小
 EYE_LINE = 0.42   # 眼线基础位置，控制上下构图
 LOWER_EDGE_LIFT_RATIO = 0.05
 ```
@@ -163,7 +165,9 @@ d = (eyes_y - robust_hair_top_y) / face_height
 H = median(d) / (EYE_LINE + LOWER_EDGE_LIFT_RATIO - target)
 ```
 
-分别生成 target 为 6%、9%、12% 的三组候选图。本轮暂用 9% 组得到的 `H=1.8584`，最终值等目视九张候选图后再决定。跨样片余白标准差等于 `pstdev(d) / H`，会随 H 增大机械下降，只能作发量差异诊断，不能作为 H 的选择标准。
+分别生成 target 为 6%、9%、12% 的三组候选图。最终采用 12% 组得到的 `H=2.0177`：余白过松可以用滚轮收紧，而切掉头顶会直接形成废片，两种偏差的代价不对称。跨样片余白标准差等于 `pstdev(d) / H`，会随 H 增大机械下降，只能作发量差异诊断，不能作为 H 的选择标准。
+
+以后凡是使用 alpha 做位置测量，都必须采用类似“该行 `alpha >= 128` 的像素数至少为 8”的稳健判定，不能使用“首个 `alpha > 0`”；样片 1 的朴素 hair-top 为 0，而稳健值为 526，说明羽化或残留 alpha 会一直延伸到图像顶行。
 
 两个独立的失败标志，不要合并：
 

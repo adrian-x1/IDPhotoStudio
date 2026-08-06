@@ -57,6 +57,9 @@ class CropGeometryTests(unittest.TestCase):
                 self.assertFalse(result.insufficient_space)
                 self.assertFalse(result.insufficient_resolution)
 
+    def test_default_face_height_scale_is_final_target_12_candidate(self) -> None:
+        self.assertEqual(H, 2.0177)
+
     def test_lower_edge_lift_is_adjustable_and_preserves_crop_ratio(self) -> None:
         face = self.face(1000.0, Point(2000.0, 1500.0))
         target = TargetSize(25, 35)

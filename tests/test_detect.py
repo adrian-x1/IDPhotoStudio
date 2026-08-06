@@ -3,6 +3,8 @@ import math
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -22,6 +24,7 @@ class FaceDetectionIntegrationTests(unittest.TestCase):
         import cv2
         import numpy as np
 
+        from core import detect as detect_module
         from core.crop import TargetSize, calculate_crop_box
         from core.detect import (
             _candidate_from_landmarks,
@@ -32,12 +35,39 @@ class FaceDetectionIntegrationTests(unittest.TestCase):
 
         cls.cv2 = cv2
         cls.np = np
+        cls.detect_module = detect_module
         cls.TargetSize = TargetSize
         cls.calculate_crop_box = staticmethod(calculate_crop_box)
         cls.detect_face = staticmethod(detect_face)
         cls.candidate_from_landmarks = staticmethod(_candidate_from_landmarks)
         cls.select_largest_face = staticmethod(_select_largest_face)
         cls.resolve_model_path = staticmethod(_resolve_model_path)
+
+    class FakeLandmarker:
+        def __init__(self) -> None:
+            self.detect_calls = 0
+            self.active_calls = 0
+            self.maximum_active_calls = 0
+            self.state_lock = threading.Lock()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def detect(self, _image):
+            with self.state_lock:
+                self.detect_calls += 1
+                self.active_calls += 1
+                self.maximum_active_calls = max(
+                    self.maximum_active_calls,
+                    self.active_calls,
+                )
+            time.sleep(0.05)
+            with self.state_lock:
+                self.active_calls -= 1
+            return SimpleNamespace(face_landmarks=[])
 
     @staticmethod
     def landmarks(scale: float = 1.0):
@@ -126,6 +156,53 @@ class FaceDetectionIntegrationTests(unittest.TestCase):
         blank_rgb = self.np.zeros((480, 640, 3), dtype=self.np.uint8)
 
         self.assertIsNone(self.detect_face(blank_rgb))
+
+    def test_landmarker_instance_is_created_once_and_reused(self) -> None:
+        fake = self.FakeLandmarker()
+        image = self.np.zeros((2, 2, 3), dtype=self.np.uint8)
+
+        with (
+            patch.object(self.detect_module, "_landmarker", None, create=True),
+            patch.object(
+                self.detect_module.FaceLandmarker,
+                "create_from_options",
+                return_value=fake,
+            ) as create,
+        ):
+            self.detect_face(image)
+            self.detect_face(image)
+
+        self.assertEqual(create.call_count, 1)
+        self.assertEqual(fake.detect_calls, 2)
+
+    def test_shared_landmarker_calls_are_serialized(self) -> None:
+        fake = self.FakeLandmarker()
+        image = self.np.zeros((2, 2, 3), dtype=self.np.uint8)
+        errors = []
+
+        def run_detection() -> None:
+            try:
+                self.detect_face(image)
+            except Exception as error:  # pragma: no cover - assertion aid
+                errors.append(error)
+
+        with (
+            patch.object(self.detect_module, "_landmarker", None, create=True),
+            patch.object(
+                self.detect_module.FaceLandmarker,
+                "create_from_options",
+                return_value=fake,
+            ),
+        ):
+            workers = [threading.Thread(target=run_detection) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(fake.detect_calls, 2)
+        self.assertEqual(fake.maximum_active_calls, 1)
 
     def test_private_samples_detect_and_crop_without_overflow(self) -> None:
         samples_dir = Path(__file__).resolve().parents[1] / "samples"
