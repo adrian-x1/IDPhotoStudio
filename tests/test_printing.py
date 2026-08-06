@@ -52,6 +52,28 @@ class PrintingTests(unittest.TestCase):
         self.assertIs(outcome, PrintOutcome.CANCELLED)
         painter_class.assert_not_called()
 
+    def test_enables_full_page_before_requesting_zero_margins(self) -> None:
+        sheet = Image.new("RGB", (1205, 1795), "white")
+        layout = solve_layout(25, 35)
+
+        with (
+            patch(
+                "ui.printing.QPrinterInfo.availablePrinters",
+                return_value=[object()],
+            ),
+            patch("ui.printing.QPrinter") as printer_class,
+            patch("ui.printing.QPrintDialog") as dialog_class,
+        ):
+            dialog_class.return_value.exec.return_value = QDialog.DialogCode.Rejected
+            outcome = print_sheet(sheet, layout)
+
+        self.assertIs(outcome, PrintOutcome.CANCELLED)
+        method_names = [call[0] for call in printer_class.return_value.method_calls]
+        self.assertLess(
+            method_names.index("setFullPage"),
+            method_names.index("setPageMargins"),
+        )
+
     def test_prints_full_page_in_the_layout_orientation(self) -> None:
         cases = (
             (solve_layout(25, 35), QPageLayout.Orientation.Portrait),

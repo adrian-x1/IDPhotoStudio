@@ -43,11 +43,11 @@ def print_sheet(
         else QPageLayout.Orientation.Portrait
     )
     printer.setPageOrientation(orientation)
+    printer.setFullPage(True)
     printer.setPageMargins(
         QMarginsF(0, 0, 0, 0),
         QPageLayout.Unit.Millimeter,
     )
-    printer.setFullPage(True)
 
     dialog = QPrintDialog(printer, parent)
     if dialog.exec() != QDialog.DialogCode.Accepted:
