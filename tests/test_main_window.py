@@ -164,6 +164,31 @@ class MainWindowTests(unittest.TestCase):
                 self.assertIsInstance(radio, QRadioButton)
                 self.assertTrue(radio.property("segment"))
 
+    def test_crop_orientation_is_an_accessible_exclusive_segment_defaulting_portrait(
+        self,
+    ) -> None:
+        self.assertIsInstance(
+            getattr(self.window, "crop_orientation_group", None),
+            QButtonGroup,
+        )
+        self.assertTrue(self.window.crop_orientation_group.exclusive())
+        radios = (
+            self.window.crop_portrait_radio,
+            self.window.crop_landscape_radio,
+        )
+        self.assertEqual([radio.text() for radio in radios], ["竖向", "横向"])
+        self.assertEqual(
+            [radio.accessibleName() for radio in radios],
+            ["竖向裁剪", "横向裁剪"],
+        )
+        self.assertTrue(self.window.crop_portrait_radio.isChecked())
+        self.assertFalse(self.window.crop_landscape_radio.isChecked())
+        for radio in radios:
+            with self.subTest(radio=radio.objectName()):
+                self.assertIsInstance(radio, QRadioButton)
+                self.assertTrue(radio.property("segment"))
+                self.assertIn("只改变裁剪", radio.toolTip())
+
     def test_colored_background_segments_show_only_centered_accessible_dots(self) -> None:
         colored_radios = (
             (self.window.white_background_radio, "白底"),
@@ -331,6 +356,91 @@ class MainWindowTests(unittest.TestCase):
             / self.window.crop_view.crop_box.height,
             12 / 16,
         )
+
+    def test_landscape_crop_swaps_ratio_without_changing_sheet_layout(self) -> None:
+        self.assertTrue(self.load_portrait())
+        portrait_layout = self.window.sheet_layout
+        portrait_sheet_size = self.window.sheet_image.size
+
+        self.window.crop_landscape_radio.setChecked(True)
+        self.app.processEvents()
+
+        box = self.window.crop_view.crop_box
+        self.assertAlmostEqual(box.width / box.height, 35 / 25)
+        self.assertGreater(
+            self.window.finished_photo.width,
+            self.window.finished_photo.height,
+        )
+        self.assertEqual(self.window.sheet_layout, portrait_layout)
+        self.assertEqual(self.window.sheet_image.size, portrait_sheet_size)
+
+        expected_sheet = compose_sheet(
+            self.window.finished_photo.transpose(Image.Transpose.ROTATE_270),
+            25,
+            35,
+            portrait_layout,
+            gap=self.window.gap_spin.value(),
+            draw_cut_lines=self.window.cut_lines_check.isChecked(),
+        )
+        self.assertEqual(self.window.sheet_image.tobytes(), expected_sheet.tobytes())
+
+        self.window.crop_portrait_radio.setChecked(True)
+        self.app.processEvents()
+        portrait_box = self.window.crop_view.crop_box
+        self.assertAlmostEqual(portrait_box.width / portrait_box.height, 25 / 35)
+        self.assertEqual(self.window.sheet_layout, portrait_layout)
+
+    def test_landscape_orientation_persists_across_spec_and_image_changes(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.window.crop_landscape_radio.setChecked(True)
+
+        self.window.spec_combo.setCurrentText("英语四六级")
+        self.app.processEvents()
+        self.assertTrue(self.window.crop_landscape_radio.isChecked())
+        self.assertAlmostEqual(
+            self.window.crop_view.crop_box.width
+            / self.window.crop_view.crop_box.height,
+            16 / 12,
+        )
+
+        self.assertTrue(self.load_portrait())
+        self.assertTrue(self.window.crop_landscape_radio.isChecked())
+        self.assertAlmostEqual(
+            self.window.crop_view.crop_box.width
+            / self.window.crop_view.crop_box.height,
+            16 / 12,
+        )
+
+    def test_missing_face_uses_centered_landscape_manual_crop(self) -> None:
+        self.window.crop_landscape_radio.setChecked(True)
+
+        with patch("ui.main_window.detect_face", return_value=None):
+            self.assertFalse(self.window.load_image(self.image_path))
+
+        box = self.window.crop_view.crop_box
+        self.assertAlmostEqual(box.width / box.height, 35 / 25)
+        self.assertGreaterEqual(box.left, 0)
+        self.assertGreaterEqual(box.top, 0)
+        self.assertLessEqual(box.right, self.window.source_image.width)
+        self.assertLessEqual(box.bottom, self.window.source_image.height)
+
+    def test_reset_crop_keeps_landscape_orientation(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.window.crop_landscape_radio.setChecked(True)
+        automatic_box = self.window.crop_view.crop_box
+        moved_box = CropBox(
+            automatic_box.left,
+            automatic_box.top + 10,
+            automatic_box.right,
+            automatic_box.bottom + 10,
+        )
+        self.window.crop_view.cropBoxChanged.emit(moved_box)
+
+        self.window.reset_crop_button.click()
+        self.app.processEvents()
+
+        self.assertTrue(self.window.crop_landscape_radio.isChecked())
+        self.assertEqual(self.window.crop_view.crop_box, automatic_box)
 
     def test_original_background_crop_changes_refresh_immediately_with_core_warning(self) -> None:
         self.assertTrue(self.load_portrait())
@@ -577,6 +687,55 @@ class MainWindowTests(unittest.TestCase):
                 self.window.finished_photo.getpixel((0, 0)),
                 (67, 142, 219),
             )
+
+    def test_orientation_change_discards_stale_matting_result(self) -> None:
+        self.assertTrue(self.load_portrait())
+        first_started = threading.Event()
+        first_release = threading.Event()
+        second_started = threading.Event()
+        second_release = threading.Event()
+        call_sizes: list[tuple[int, int]] = []
+
+        def controlled_extract(image: Image.Image) -> Image.Image:
+            call_sizes.append(image.size)
+            if len(call_sizes) == 1:
+                first_started.set()
+                if not first_release.wait(3):
+                    raise TimeoutError("test did not release first worker")
+            else:
+                second_started.set()
+                if not second_release.wait(3):
+                    raise TimeoutError("test did not release second worker")
+            return Image.new("RGBA", image.size, (0, 0, 0, 0))
+
+        with patch(
+            "ui.matting_worker.extract_foreground",
+            side_effect=controlled_extract,
+        ):
+            self.window.blue_background_radio.setChecked(True)
+            self.wait_until(first_started.is_set)
+
+            self.window.crop_landscape_radio.setChecked(True)
+            self.app.processEvents()
+            first_release.set()
+            self.wait_until(second_started.is_set)
+
+            self.assertEqual(len(call_sizes), 2)
+            self.assertLess(call_sizes[0][0], call_sizes[0][1])
+            self.assertGreater(call_sizes[1][0], call_sizes[1][1])
+            self.assertEqual(
+                self.window.finished_photo.getpixel((0, 0)),
+                self.window.cropped_original.getpixel((0, 0)),
+            )
+
+            second_release.set()
+            self.wait_until(lambda: not self.window.progress_bar.isVisible())
+
+        self.assertGreater(
+            self.window.finished_photo.width,
+            self.window.finished_photo.height,
+        )
+        self.assertEqual(self.window.finished_photo.getpixel((0, 0)), (67, 142, 219))
 
     def test_matting_failure_restores_original_background_with_retry_message(self) -> None:
         self.assertTrue(self.load_portrait())

@@ -365,6 +365,44 @@ class MainWindow(QMainWindow):
         self.reset_crop_button.setToolTip("恢复自动裁剪位置")
         self.reset_crop_button.setEnabled(False)
 
+        self.crop_orientation_group = QButtonGroup(self)
+        self.crop_orientation_group.setExclusive(True)
+        self.crop_portrait_radio = QRadioButton("竖向")
+        self.crop_portrait_radio.setObjectName("cropPortrait")
+        self.crop_portrait_radio.setAccessibleName("竖向裁剪")
+        self.crop_landscape_radio = QRadioButton("横向")
+        self.crop_landscape_radio.setObjectName("cropLandscape")
+        self.crop_landscape_radio.setAccessibleName("横向裁剪")
+        crop_orientation_tooltip = "只改变裁剪方向，不改变 6 寸相纸排版"
+        for radio in (
+            self.crop_portrait_radio,
+            self.crop_landscape_radio,
+        ):
+            radio.setProperty("segment", True)
+            radio.setToolTip(crop_orientation_tooltip)
+            radio.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Fixed,
+            )
+            self.crop_orientation_group.addButton(radio)
+        self.crop_portrait_radio.setChecked(True)
+
+        self.crop_orientation_selector = QWidget()
+        self.crop_orientation_selector.setObjectName("cropOrientationSelector")
+        self.crop_orientation_selector.setFixedWidth(116)
+        crop_orientation_layout = QHBoxLayout(self.crop_orientation_selector)
+        crop_orientation_layout.setContentsMargins(0, 0, 0, 0)
+        crop_orientation_layout.setSpacing(0)
+        crop_orientation_layout.addWidget(self.crop_portrait_radio, 1)
+        crop_orientation_layout.addWidget(self.crop_landscape_radio, 1)
+
+        crop_header_actions = QWidget()
+        crop_header_layout = QHBoxLayout(crop_header_actions)
+        crop_header_layout.setContentsMargins(0, 0, 0, 0)
+        crop_header_layout.setSpacing(6)
+        crop_header_layout.addWidget(self.crop_orientation_selector)
+        crop_header_layout.addWidget(self.reset_crop_button)
+
         self.count_label = QLabel(EMPTY_COUNT_TEXT)
         self.count_label.setObjectName("countBadge")
         self.count_label.setAccessibleName("排版张数")
@@ -401,7 +439,7 @@ class MainWindow(QMainWindow):
             "裁剪区域",
             "拖动、滚轮或方向键微调",
             self.original_preview,
-            self.reset_crop_button,
+            crop_header_actions,
         )
         self.crop_card = self._preview_panel(
             "成品单张",
@@ -526,6 +564,9 @@ class MainWindow(QMainWindow):
         self.print_button.clicked.connect(self._print_current_sheet)
         self.reset_crop_button.clicked.connect(self.crop_view.reset_to_auto)
         self.reset_spacing_button.clicked.connect(self._reset_spacing)
+        self.crop_landscape_radio.toggled.connect(
+            self._on_crop_orientation_toggled
+        )
         self.crop_view.cropBoxChanged.connect(self._on_crop_box_changed)
         self.crop_view.interactionFinished.connect(
             self._on_crop_interaction_finished
@@ -674,12 +715,16 @@ class MainWindow(QMainWindow):
         if self.source_image is not None:
             self._refresh_crop()
 
+    def _on_crop_orientation_toggled(self, checked: bool) -> None:
+        del checked
+        if self.source_image is not None:
+            self._refresh_crop()
+
     def _refresh_crop(self) -> None:
         if self.source_image is None:
             return
         self._invalidate_crop_revision()
-        spec = self.specs[self.spec_combo.currentText()]
-        target = TargetSize(spec["width_mm"], spec["height_mm"])
+        target = self._current_target_size()
         aspect_ratio = target.width_mm / target.height_mm
         if self.face is not None:
             self._input_warnings = []
@@ -798,7 +843,11 @@ class MainWindow(QMainWindow):
 
     def _current_target_size(self) -> TargetSize:
         spec = self.specs[self.spec_combo.currentText()]
-        return TargetSize(spec["width_mm"], spec["height_mm"])
+        width_mm = spec["width_mm"]
+        height_mm = spec["height_mm"]
+        if self.crop_landscape_radio.isChecked():
+            width_mm, height_mm = height_mm, width_mm
+        return TargetSize(width_mm, height_mm)
 
     def _on_background_toggled(self, checked: bool) -> None:
         if not checked:
@@ -967,8 +1016,11 @@ class MainWindow(QMainWindow):
             return
 
         self.sheet_layout = layout
+        layout_photo = self.finished_photo
+        if self.crop_landscape_radio.isChecked():
+            layout_photo = layout_photo.transpose(Image.Transpose.ROTATE_270)
         self.sheet_image = compose_sheet(
-            self.finished_photo,
+            layout_photo,
             spec["width_mm"],
             spec["height_mm"],
             layout,
