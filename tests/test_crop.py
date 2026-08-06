@@ -6,13 +6,15 @@ from core import crop as crop_module
 from core.crop import (
     CropBox,
     EYE_LINE,
-    K,
+    H,
     LOWER_EDGE_LIFT_RATIO,
     FaceGeometry,
     Point,
     TargetSize,
     calculate_crop_box,
+    minimum_face_height_for_300dpi,
 )
+from core.units import mm_to_px
 
 
 class CropGeometryTests(unittest.TestCase):
@@ -32,7 +34,7 @@ class CropGeometryTests(unittest.TestCase):
             face_height=bbox_width,
         )
 
-    def test_all_specs_follow_empirical_geometry(self) -> None:
+    def test_all_specs_follow_face_height_geometry(self) -> None:
         face = self.face(1000.0, Point(2000.0, 1500.0))
 
         for name, spec in self.specs.items():
@@ -40,8 +42,8 @@ class CropGeometryTests(unittest.TestCase):
                 target = TargetSize(spec["width_mm"], spec["height_mm"])
                 result = calculate_crop_box(face, 4000, 4000, target)
                 box = result.box
-                expected_width = face.bbox_width * K
-                expected_height = expected_width * target.height_mm / target.width_mm
+                expected_height = face.face_height * H
+                expected_width = expected_height * target.width_mm / target.height_mm
 
                 self.assertAlmostEqual(box.width, expected_width)
                 self.assertAlmostEqual(box.height, expected_height)
@@ -80,7 +82,7 @@ class CropGeometryTests(unittest.TestCase):
         self.assertTrue(result.insufficient_space)
         self.assertFalse(result.insufficient_resolution)
         self.assertEqual(result.box.left, 0.0)
-        self.assertAlmostEqual(result.box.width, face.bbox_width * K)
+        self.assertAlmostEqual(result.box.height, face.face_height * H)
         self.assertAlmostEqual(result.box.width / result.box.height, 25 / 35)
         self.assertLessEqual(result.box.right, 1000)
         self.assertLessEqual(result.box.bottom, 1200)
@@ -125,6 +127,21 @@ class CropGeometryTests(unittest.TestCase):
         )
         self.assertTrue(
             check_resolution(CropBox(0, 0, 295, 412), target)
+        )
+
+    def test_minimum_face_height_is_derived_from_300dpi_target(self) -> None:
+        target = TargetSize(55, 84)
+
+        expected = max(
+            mm_to_px(target.height_mm) / H,
+            mm_to_px(target.width_mm)
+            * target.height_mm
+            / (H * target.width_mm),
+        )
+
+        self.assertAlmostEqual(
+            minimum_face_height_for_300dpi(target),
+            expected,
         )
 
 

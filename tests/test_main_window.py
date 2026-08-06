@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
@@ -427,6 +428,48 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(self.window.sheet_preview.pixmap().isNull())
         self.assertEqual(self.window.count_label.text(), "共 12 张")
         self.assertFalse(self.window.reset_crop_button.isEnabled())
+
+    def test_multiple_faces_show_non_blocking_largest_face_notice(self) -> None:
+        detection = FaceDetectionResult(self.face, 2)
+
+        with patch("ui.main_window.detect_face", return_value=detection):
+            self.assertTrue(self.window.load_image(self.image_path))
+
+        self.assertIn(
+            "检测到多张人脸，已按最大的裁剪",
+            self.window.status_label.text(),
+        )
+        self.assertIsNotNone(self.window.sheet_image)
+
+    def test_roll_over_five_degrees_shows_non_blocking_notice(self) -> None:
+        detection = FaceDetectionResult(
+            replace(self.face, roll_degrees=-6.25),
+            1,
+        )
+
+        with patch("ui.main_window.detect_face", return_value=detection):
+            self.assertTrue(self.window.load_image(self.image_path))
+
+        self.assertIn(
+            "头部倾斜 6.2 度，建议重拍",
+            self.window.status_label.text(),
+        )
+        self.assertIsNotNone(self.window.sheet_image)
+
+    def test_small_face_shows_derived_resolution_notice_without_blocking(self) -> None:
+        detection = FaceDetectionResult(
+            replace(self.face, face_height=100.0),
+            1,
+        )
+
+        with patch("ui.main_window.detect_face", return_value=detection):
+            self.assertTrue(self.window.load_image(self.image_path))
+
+        self.assertIn(
+            "人脸太小，裁剪后像素不足",
+            self.window.status_label.text(),
+        )
+        self.assertIsNotNone(self.window.sheet_image)
 
     def test_background_worker_keeps_controls_responsive_and_reuses_alpha(self) -> None:
         self.assertTrue(self.load_portrait())

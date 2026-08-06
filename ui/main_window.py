@@ -46,6 +46,7 @@ from core.crop import (
     TargetSize,
     calculate_crop_box,
     is_insufficient_resolution,
+    minimum_face_height_for_300dpi,
 )
 from core.detect import detect_face
 from core.export import export_pdf, export_png
@@ -172,6 +173,7 @@ class MainWindow(QMainWindow):
         self._crop_warning = ""
         self._crop_space_warning = ""
         self._crop_mode_note = ""
+        self._input_warnings: list[str] = []
         self._crop_revision = 0
         self._foreground_cache: tuple[int, Image.Image] | None = None
         self._active_worker: MattingWorker | None = None
@@ -632,6 +634,8 @@ class MainWindow(QMainWindow):
                 source = ImageOps.exif_transpose(opened).convert("RGB")
         except (FileNotFoundError, OSError, ValueError) as error:
             self.source_image = None
+            self.face_count = 0
+            self._input_warnings = []
             self.crop_view.clear_image()
             self.reset_crop_button.setEnabled(False)
             self._clear_processed_previews()
@@ -646,6 +650,7 @@ class MainWindow(QMainWindow):
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
             self.face = None
             self.face_count = 0
+            self._input_warnings = []
             self.reset_crop_button.setEnabled(False)
             self._clear_processed_previews()
             self._set_matting_progress(False)
@@ -655,6 +660,7 @@ class MainWindow(QMainWindow):
         if detection is None:
             self.face = None
             self.face_count = 0
+            self._input_warnings = []
             self._refresh_crop()
             return False
 
@@ -675,6 +681,17 @@ class MainWindow(QMainWindow):
         target = TargetSize(spec["width_mm"], spec["height_mm"])
         aspect_ratio = target.width_mm / target.height_mm
         if self.face is not None:
+            self._input_warnings = []
+            if self.face_count > 1:
+                self._input_warnings.append(
+                    "检测到多张人脸，已按最大的裁剪"
+                )
+            if abs(self.face.roll_degrees) > 5.0:
+                self._input_warnings.append(
+                    f"头部倾斜 {abs(self.face.roll_degrees):.1f} 度，建议重拍"
+                )
+            if self.face.face_height < minimum_face_height_for_300dpi(target):
+                self._input_warnings.append("人脸太小，裁剪后像素不足")
             result = calculate_crop_box(
                 self.face,
                 self.source_image.width,
@@ -691,6 +708,7 @@ class MainWindow(QMainWindow):
             self.reset_crop_button.setEnabled(True)
         else:
             box = self._centered_manual_box(aspect_ratio)
+            self._input_warnings = []
             self._crop_space_warning = ""
             self._crop_mode_note = "未检测到人脸，已进入手动裁剪模式"
             self.reset_crop_button.setEnabled(False)
@@ -721,8 +739,11 @@ class MainWindow(QMainWindow):
         box: CropBox,
         target: TargetSize,
     ) -> None:
-        warnings = [self._crop_space_warning] if self._crop_space_warning else []
-        if is_insufficient_resolution(box, target):
+        warnings = list(self._input_warnings)
+        if self._crop_space_warning:
+            warnings.append(self._crop_space_warning)
+        has_small_face_warning = "人脸太小，裁剪后像素不足" in warnings
+        if is_insufficient_resolution(box, target) and not has_small_face_warning:
             warnings.append("裁剪区域像素不足，放大后可能模糊")
         self._crop_warning = "；".join(warnings)
 
