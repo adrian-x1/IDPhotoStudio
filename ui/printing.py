@@ -7,17 +7,30 @@ from enum import Enum, auto
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QMarginsF, QSizeF
-from PySide6.QtGui import QPageLayout, QPageSize, QPainter
+from PySide6.QtGui import QColorSpace, QImage, QPageLayout, QPageSize, QPainter
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter, QPrinterInfo
 from PySide6.QtWidgets import QDialog, QWidget
 
+from core.export import OUTPUT_DPI
 from core.layout import LayoutResult
+
+
+DOTS_PER_METRE_300_DPI = round(OUTPUT_DPI / 0.0254)
 
 
 class PrintOutcome(Enum):
     PRINTED = auto()
     CANCELLED = auto()
     NO_PRINTER = auto()
+
+
+def _prepare_print_image(sheet_image: Image.Image) -> QImage:
+    """Convert a completed sheet to an opaque, tagged 300-DPI sRGB image."""
+    qimage = ImageQt(sheet_image.convert("RGB")).copy()
+    qimage.setColorSpace(QColorSpace(QColorSpace.NamedColorSpace.SRgb))
+    qimage.setDotsPerMeterX(DOTS_PER_METRE_300_DPI)
+    qimage.setDotsPerMeterY(DOTS_PER_METRE_300_DPI)
+    return qimage
 
 
 def print_sheet(
@@ -53,11 +66,12 @@ def print_sheet(
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return PrintOutcome.CANCELLED
 
-    qimage = ImageQt(sheet_image.convert("RGBA")).copy()
+    qimage = _prepare_print_image(sheet_image)
     target = printer.pageLayout().fullRectPixels(printer.resolution())
     painter = QPainter(printer)
     try:
-        painter.drawImage(target, qimage)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawImage(target, qimage, qimage.rect())
     finally:
         painter.end()
     return PrintOutcome.PRINTED

@@ -5,11 +5,12 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtGui import QPageLayout, QPageSize
+from PySide6.QtGui import QColorSpace, QPageLayout, QPageSize, QPainter
 from PySide6.QtPrintSupport import QPrintDialog
 from PySide6.QtWidgets import QApplication, QDialog
 
 from core.layout import solve_layout
+from ui import printing as printing_module
 from ui.printing import PrintOutcome, print_sheet
 
 
@@ -30,6 +31,29 @@ class PrintingTests(unittest.TestCase):
 
         self.assertIs(outcome, PrintOutcome.NO_PRINTER)
         dialog_exec.assert_not_called()
+
+    def test_prepared_print_image_is_opaque_srgb_300dpi_and_preserves_blue(
+        self,
+    ) -> None:
+        prepare_print_image = getattr(
+            printing_module,
+            "_prepare_print_image",
+            None,
+        )
+        self.assertIsNotNone(prepare_print_image)
+        if prepare_print_image is None:
+            return
+        source = Image.new("RGBA", (24, 36), (67, 142, 219, 128))
+
+        qimage = prepare_print_image(source)
+
+        expected_srgb = QColorSpace(QColorSpace.NamedColorSpace.SRgb)
+        self.assertFalse(qimage.hasAlphaChannel())
+        self.assertTrue(qimage.colorSpace().isValid())
+        self.assertEqual(qimage.colorSpace(), expected_srgb)
+        self.assertEqual(qimage.dotsPerMeterX(), 11811)
+        self.assertEqual(qimage.dotsPerMeterY(), 11811)
+        self.assertEqual(qimage.pixelColor(0, 0).getRgb()[:3], (67, 142, 219))
 
     def test_cancelled_dialog_does_not_draw(self) -> None:
         sheet = Image.new("RGB", (1205, 1795), "white")
@@ -102,6 +126,7 @@ class PrintingTests(unittest.TestCase):
                     ),
                     patch("ui.printing.QPainter") as painter_class,
                 ):
+                    painter_class.RenderHint = QPainter.RenderHint
                     outcome = print_sheet(sheet, layout)
 
                 self.assertIs(outcome, PrintOutcome.PRINTED)
@@ -121,13 +146,18 @@ class PrintingTests(unittest.TestCase):
                 )
 
                 painter = painter_class.return_value
+                painter.setRenderHint.assert_called_once_with(
+                    QPainter.RenderHint.SmoothPixmapTransform,
+                    True,
+                )
                 painter.drawImage.assert_called_once()
-                target, qimage = painter.drawImage.call_args.args
+                target, qimage, source = painter.drawImage.call_args.args
                 self.assertEqual(
                     target,
                     page_layout.fullRectPixels(printer.resolution()),
                 )
                 self.assertEqual((qimage.width(), qimage.height()), sheet.size)
+                self.assertEqual(source, qimage.rect())
 
 
 if __name__ == "__main__":
