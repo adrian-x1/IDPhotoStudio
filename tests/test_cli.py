@@ -7,6 +7,7 @@ from PIL import Image
 
 import idphoto_cli
 from core.crop import FaceGeometry, Point
+from core.detect import FaceDetectionResult
 from core.units import mm_to_px
 
 
@@ -14,8 +15,13 @@ class CommandLinePipelineTests(unittest.TestCase):
     def test_build_sheet_writes_300dpi_4r_png(self) -> None:
         face = FaceGeometry(
             bbox_width=400.0,
+            chin=Point(500.0, 700.0),
+            forehead=Point(500.0, 300.0),
             eyes_center=Point(500.0, 500.0),
+            roll_degrees=0.0,
+            face_height=400.0,
         )
+        detection = FaceDetectionResult(face, 1)
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "portrait.jpg"
@@ -23,7 +29,7 @@ class CommandLinePipelineTests(unittest.TestCase):
             Image.new("RGB", (1000, 1200), (80, 100, 120)).save(input_path)
 
             with (
-                patch("idphoto_cli.detect_face", return_value=face) as detect_face,
+                patch("idphoto_cli.detect_face", return_value=detection) as detect_face,
                 patch(
                     "idphoto_cli.replace_background",
                     side_effect=lambda image, background: image.convert("RGB"),

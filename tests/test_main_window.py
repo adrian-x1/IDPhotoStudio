@@ -28,6 +28,7 @@ from core.crop import (
     TargetSize,
     calculate_crop_box,
 )
+from core.detect import FaceDetectionResult
 from core.layout import compose_sheet
 from ui.main_window import IMAGE_FILE_FILTER, SUPPORTED_IMAGE_SUFFIXES, MainWindow
 from ui.printing import PrintOutcome
@@ -44,8 +45,13 @@ class MainWindowTests(unittest.TestCase):
         Image.new("RGB", (1000, 1200), (80, 100, 120)).save(self.image_path)
         self.face = FaceGeometry(
             bbox_width=400.0,
+            chin=Point(500.0, 700.0),
+            forehead=Point(500.0, 300.0),
             eyes_center=Point(500.0, 500.0),
+            roll_degrees=0.0,
+            face_height=400.0,
         )
+        self.detection = FaceDetectionResult(self.face, 1)
         self.window = MainWindow()
         self.window.show()
         self.app.processEvents()
@@ -57,7 +63,7 @@ class MainWindowTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def load_portrait(self) -> bool:
-        with patch("ui.main_window.detect_face", return_value=self.face):
+        with patch("ui.main_window.detect_face", return_value=self.detection):
             return self.window.load_image(self.image_path)
 
     def wait_until(self, condition, timeout_ms: int = 3000) -> None:
@@ -222,7 +228,7 @@ class MainWindowTests(unittest.TestCase):
         )
 
         with (
-            patch("ui.main_window.detect_face", return_value=self.face),
+            patch("ui.main_window.detect_face", return_value=self.detection),
             patch.object(
                 self.window,
                 "load_image",
@@ -252,7 +258,7 @@ class MainWindowTests(unittest.TestCase):
         uppercase_path = Path(self.temp_dir.name) / "PORTRAIT.JPG"
         Image.new("RGB", (640, 800), (20, 100, 160)).save(uppercase_path)
         valid = self.drop_event(QUrl.fromLocalFile(str(uppercase_path)))
-        with patch("ui.main_window.detect_face", return_value=self.face):
+        with patch("ui.main_window.detect_face", return_value=self.detection):
             self.window.dropEvent(valid)
 
         self.assertTrue(valid.isAccepted())

@@ -51,7 +51,7 @@ python -m unittest discover -s tests -p "test_detect.py" -v
 
 ## 5. 构建 onedir 程序
 
-确认两个模型文件都在 `assets\models\` 后执行：
+确认三个模型文件都在 `assets\models\` 后执行：
 
 ```bat
 pyinstaller build.spec
@@ -71,13 +71,15 @@ dist\idphoto\idphoto.exe
 
 问题排除后必须把它改回 `console=False`，删除旧的 `build\` 和 `dist\`，然后重新执行 `pyinstaller build.spec` 生成正式版本。
 
-## 6. 断网验证两个模型
+## 6. 断网验证运行时模型
 
 构建完成后断开 Wi-Fi 和网线，再运行 `dist\idphoto\idphoto.exe`：
 
-1. 导入一张有人脸的照片，确认能自动出现裁剪框。这会加载 `blaze_face_short_range.tflite`。
+1. 导入一张有人脸的照片，确认能自动出现裁剪框。这会加载 `face_landmarker.task`。
 2. 把底色从“保持原底”切换为白、蓝或红，等待换底结果出现。这会加载 `isnet-general-use.onnx`。
 3. 两步都不能出现下载提示、联网失败或模型缺失错误。
+
+`blaze_face_short_range.tflite` 仍随包保留，但当前运行时代码不加载它。目标 Xeon E5-2680 v2 没有 AVX2，FaceLandmarker 尚需本机验证；验证通过后再单独删除这个回退资产。
 
 ## 7. 打印与尺寸验收
 

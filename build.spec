@@ -9,6 +9,7 @@ datas = (
     + copy_metadata("pymatting")
     + [
         ("assets/models/isnet-general-use.onnx", "assets/models"),
+        ("assets/models/face_landmarker.task", "assets/models"),
         ("assets/models/blaze_face_short_range.tflite", "assets/models"),
         ("specs.json", "."),
         ("ui/icons", "ui/icons"),

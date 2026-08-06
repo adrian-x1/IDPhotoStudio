@@ -19,7 +19,7 @@ created: 2026-08-05
 | 语言 / GUI | Python 3.13 + PySide6 | Mac 上能直接跑起来看界面，图像生态最全 |
 | 图像处理 | Pillow + OpenCV | 裁剪、合成、排版 |
 | 抠图 | rembg + `isnet-general-use` 模型，CPU 推理 | 发丝边缘接近专业水平；Xeon E5-2680 v2 单张 1-3 秒够用 |
-| 人脸检测 | MediaPipe 1.0 Tasks API 的 `FaceDetector` | 拿 bbox 宽度和双眼坐标算裁剪框 |
+| 人脸检测 | MediaPipe 1.0 Tasks API 的 `FaceLandmarker` | 478 点模型提供下巴、额头、虹膜和眼角坐标 |
 | 打印 | PySide6 `QPrinter` + `QPageSize`，全尺寸模式 | 唯一能锁定物理尺寸不被驱动缩放的方案 |
 | 打包 | PyInstaller **onedir**（不是 onefile） | onefile 每次启动都要把 ~180MB 模型解压到临时目录，慢 |
 | 代码传输 | 手动打包 zip 传到 Windows 机器 | 用户环境无法访问 GitHub |
@@ -31,23 +31,27 @@ MediaPipe 1.0 **删除了旧的 `mp.solutions` API**，`mp.solutions.face_detect
 ```python
 import mediapipe as mp
 from mediapipe.tasks.python import BaseOptions
-from mediapipe.tasks.python.vision import FaceDetector, FaceDetectorOptions
+from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions
 
-opts = FaceDetectorOptions(
-    base_options=BaseOptions(model_asset_path='assets/models/blaze_face_short_range.tflite'),
-    min_detection_confidence=0.5,
+opts = FaceLandmarkerOptions(
+    base_options=BaseOptions(model_asset_path='assets/models/face_landmarker.task'),
+    num_faces=5,
+    output_face_blendshapes=False,
+    output_facial_transformation_matrixes=False,
 )
-detector = FaceDetector.create_from_options(opts)
-result = detector.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_array))
+landmarker = FaceLandmarker.create_from_options(opts)
+result = landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_array))
 ```
 
-`detections[0].bounding_box` 是绝对像素（`origin_x/origin_y/width/height`），而 `keypoints` 是**归一化坐标**（0-1，需乘图像宽高）。两者单位不同，容易混。keypoints 顺序：0 右眼、1 左眼、2 鼻尖、3 嘴中心、4 右耳、5 左耳。
+FaceLandmarker 的 landmark 坐标是**归一化坐标**（0-1），必须分别乘图像宽高转成绝对像素。当前使用 152（下巴）、10（额头）、468-477（两侧虹膜）和 33/263（两眼外角）。最多检测 5 张脸，按全部 landmark 外接矩形面积选择最大脸。
 
-人脸检测模型也要提前下好（224KB，来自 Google CDN 而非 GitHub，Windows 那台大概能直连）：
+FaceLandmarker 模型要提前下好（约 3.6MB，来自 Google CDN）：
 ```bash
-curl -L -o assets/models/blaze_face_short_range.tflite \
-  https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
+curl -L -o assets/models/face_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
 ```
+
+`blaze_face_short_range.tflite` 暂时继续随包保留，但运行时代码不引用。原因是 Windows 真机尚未验证，目标 Xeon E5-2680 v2 没有 AVX2；FaceLandmarker 真机通过后再单独清理回退资产。
 
 ## 两个必踩的坑（先解决，否则后面全白干）
 
@@ -237,7 +241,7 @@ idphoto/
 ├── main.py                  # 入口，第一件事就是设 U2NET_HOME
 ├── core/
 │   ├── units.py             # mm↔px 唯一转换处
-│   ├── detect.py            # MediaPipe FaceDetector，输出 bbox 宽 + 双眼坐标
+│   ├── detect.py            # MediaPipe FaceLandmarker，输出解剖点、虹膜中点和倾斜角
 │   ├── crop.py              # 裁剪框计算（K + EYE_LINE 两参数）
 │   ├── matting.py           # rembg 抠图 + 换底 + alpha 修补
 │   ├── layout.py            # solve_layout + 网格合成
@@ -249,7 +253,8 @@ idphoto/
 │   └── brush_view.py        # alpha 修补画笔
 ├── assets/models/
 │   ├── isnet-general-use.onnx          # rembg 抠图，170MB
-│   └── blaze_face_short_range.tflite   # 人脸检测，224KB
+│   ├── face_landmarker.task            # 当前人脸 landmark 检测，约 3.6MB
+│   └── blaze_face_short_range.tflite   # Windows 未验证前保留的回退资产
 ├── specs.json               # 10 个可选规格：毫米尺寸 + 电子照目标像素
 ├── tests/
 ├── requirements.txt
@@ -275,7 +280,7 @@ PySide6 套上去，三栏布局，抠图丢后台线程。**可拖拽裁剪框�
 `printing.py` 三条路径都实现。Mac 上先验证导出的 PNG/PDF 物理尺寸对不对（用预览打开看文档属性里的尺寸是不是 102×152mm）。
 
 **阶段 4：Windows 打包与真机验证**
-写 `build.spec`，把代码 + 两个模型打包成 zip 传到 Windows 机器。Windows 上装 **Python 3.13**（和 Mac 一致）→ `pip install -r requirements.txt` → `pyinstaller build.spec` → 跑 exe。真机必须验证：两个模型加载都不联网、抠图能出结果、**实际打印一张量一下尺寸对不对**。
+写 `build.spec`，把代码 + 三个模型资产打包成 zip 传到 Windows 机器。Windows 上装 **Python 3.13**（和 Mac 一致）→ `pip install -r requirements.txt` → `pyinstaller build.spec` → 跑 exe。真机必须验证：FaceLandmarker 和抠图模型加载都不联网、抠图能出结果、**实际打印一张量一下尺寸对不对**。BlazeFace 只作为回退资产保留。
 
 注意 Mac 是 arm64、Windows 是 x86_64，架构不同，Mac 上装好的包不能直接拷过去，Windows 必须自己 `pip install` 一遍。
 
@@ -295,11 +300,11 @@ cd idphoto && zip -r ../idphoto-src.zip . \
 
 已完成：
 
-- **环境**：Python 3.13.7 虚拟环境 `.venv/`，全部依赖装好并验证 import 通过；两个模型已下载，rembg 离线加载确认不联网
+- **环境**：Python 3.13.7 虚拟环境 `.venv/`，全部依赖装好并验证 import 通过；FaceLandmarker、BlazeFace 回退资产和 rembg 模型均已准备
 - **`units.py`**：mm↔px 唯一转换处，300 DPI
 - **`layout.py`**：`solve_layout` 四组合求解，10 个规格的张数、布局全部与验收表一致。并列时优先级为：张数 → **照片不旋转** → 横向相纸 → 列数。照片不旋转必须排在相纸方向之前，否则一寸/简历照/四六级会被躺倒排版（张数相同但打印出来方向不对、裁剪时容易搞混）
 - **`specs.json`**：10 个规格，毫米尺寸 + 门店电子照目标像素
-- **`detect.py`**：MediaPipe 1.0 Tasks API，输出 bbox 宽度 + 双眼坐标，三张真实样片全部检出
+- **`detect.py`**：MediaPipe 1.0 FaceLandmarker，输出下巴、额头、虹膜中点、欧氏脸高和倾斜角，最多检测 5 张脸并选最大脸
 - **`crop.py`**：K + EYE_LINE 两参数，另有 `LOWER_EDGE_LIFT_RATIO=0.05` 上移下缘减少衣服入画
 - **`matting.py`**：rembg 离线抠图、session 单例复用、1.5px 羽化、三种底色
 - **`idphoto_cli.py`**：`图片 规格 底色` → `out/` PNG，阶段 1 验收产物已跑通

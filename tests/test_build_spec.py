@@ -17,6 +17,13 @@ def load_build_inputs() -> dict:
 
 
 class BuildSpecTests(unittest.TestCase):
+    def test_face_models_are_bundled_for_landmarker_and_windows_fallback(self) -> None:
+        datas = load_build_inputs()["datas"]
+        bundled_sources = {Path(source).name for source, _ in datas}
+
+        self.assertIn("face_landmarker.task", bundled_sources)
+        self.assertIn("blaze_face_short_range.tflite", bundled_sources)
+
     def test_pymatting_distribution_metadata_is_bundled(self) -> None:
         datas = load_build_inputs()["datas"]
         metadata_entries = [

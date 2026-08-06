@@ -45,9 +45,10 @@ def build_sheet(
     with Image.open(input_path) as source:
         image = ImageOps.exif_transpose(source).convert("RGB")
 
-    face = detect_face(np.asarray(image))
-    if face is None:
+    detection = detect_face(np.asarray(image))
+    if detection is None:
         raise RuntimeError("未检测到人脸，无法自动裁剪")
+    face = detection.geometry
 
     spec = specs[spec_name]
     target_size = TargetSize(spec["width_mm"], spec["height_mm"])

@@ -21,11 +21,19 @@ class CropGeometryTests(unittest.TestCase):
         specs_path = Path(__file__).resolve().parents[1] / "specs.json"
         cls.specs = json.loads(specs_path.read_text(encoding="utf-8"))
 
-    def test_all_specs_follow_empirical_geometry(self) -> None:
-        face = FaceGeometry(
-            bbox_width=1000.0,
-            eyes_center=Point(2000.0, 1500.0),
+    @staticmethod
+    def face(bbox_width: float, eyes_center: Point) -> FaceGeometry:
+        return FaceGeometry(
+            bbox_width=bbox_width,
+            chin=Point(eyes_center.x, eyes_center.y + bbox_width / 2),
+            forehead=Point(eyes_center.x, eyes_center.y - bbox_width / 2),
+            eyes_center=eyes_center,
+            roll_degrees=0.0,
+            face_height=bbox_width,
         )
+
+    def test_all_specs_follow_empirical_geometry(self) -> None:
+        face = self.face(1000.0, Point(2000.0, 1500.0))
 
         for name, spec in self.specs.items():
             with self.subTest(name=name):
@@ -46,10 +54,7 @@ class CropGeometryTests(unittest.TestCase):
                 self.assertFalse(result.insufficient_resolution)
 
     def test_lower_edge_lift_is_adjustable_and_preserves_crop_ratio(self) -> None:
-        face = FaceGeometry(
-            bbox_width=1000.0,
-            eyes_center=Point(2000.0, 1500.0),
-        )
+        face = self.face(1000.0, Point(2000.0, 1500.0))
         target = TargetSize(25, 35)
 
         lifted = calculate_crop_box(face, 4000, 4000, target)
@@ -68,10 +73,7 @@ class CropGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(lifted.box.width / lifted.box.height, 25 / 35)
 
     def test_space_shortage_shifts_box_inside_without_changing_size(self) -> None:
-        face = FaceGeometry(
-            bbox_width=400.0,
-            eyes_center=Point(100.0, 500.0),
-        )
+        face = self.face(400.0, Point(100.0, 500.0))
 
         result = calculate_crop_box(face, 1000, 1200, TargetSize(25, 35))
 
@@ -84,10 +86,7 @@ class CropGeometryTests(unittest.TestCase):
         self.assertLessEqual(result.box.bottom, 1200)
 
     def test_oversized_box_scales_down_to_image_without_distortion(self) -> None:
-        face = FaceGeometry(
-            bbox_width=800.0,
-            eyes_center=Point(500.0, 500.0),
-        )
+        face = self.face(800.0, Point(500.0, 500.0))
 
         result = calculate_crop_box(face, 1000, 1000, TargetSize(25, 35))
 
@@ -100,10 +99,7 @@ class CropGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(result.box.width / result.box.height, 25 / 35)
 
     def test_resolution_shortage_is_independent_of_space_shortage(self) -> None:
-        face = FaceGeometry(
-            bbox_width=100.0,
-            eyes_center=Point(500.0, 500.0),
-        )
+        face = self.face(100.0, Point(500.0, 500.0))
 
         result = calculate_crop_box(face, 1000, 1000, TargetSize(25, 35))
 

@@ -27,7 +27,11 @@ class Point:
 @dataclass(frozen=True)
 class FaceGeometry:
     bbox_width: float
+    chin: Point
+    forehead: Point
     eyes_center: Point
+    roll_degrees: float
+    face_height: float
 
 
 @dataclass(frozen=True)

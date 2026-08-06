@@ -164,6 +164,7 @@ class MainWindow(QMainWindow):
         self.specs = _load_specs()
         self.source_image: Image.Image | None = None
         self.face: FaceGeometry | None = None
+        self.face_count = 0
         self.cropped_original: Image.Image | None = None
         self.finished_photo: Image.Image | None = None
         self.sheet_image: Image.Image | None = None
@@ -641,21 +642,24 @@ class MainWindow(QMainWindow):
         self.source_image = source
         self.crop_view.set_image(source)
         try:
-            face = detect_face(np.asarray(source))
+            detection = detect_face(np.asarray(source))
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
             self.face = None
+            self.face_count = 0
             self.reset_crop_button.setEnabled(False)
             self._clear_processed_previews()
             self._set_matting_progress(False)
             self.status_label.setText(f"人脸检测失败：{error}")
             return False
 
-        if face is None:
+        if detection is None:
             self.face = None
+            self.face_count = 0
             self._refresh_crop()
             return False
 
-        self.face = face
+        self.face = detection.geometry
+        self.face_count = detection.face_count
         self._refresh_crop()
         return True
 
