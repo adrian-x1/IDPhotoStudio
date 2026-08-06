@@ -333,20 +333,12 @@ QRadioButton#backgroundOriginal {{
     border-bottom-left-radius: 8px;
 }}
 
-QRadioButton#cropPortrait {{
-    border-top-left-radius: 8px;
-    border-bottom-left-radius: 8px;
-}}
-
-QRadioButton#backgroundRed,
-QRadioButton#cropLandscape {{
+QRadioButton#backgroundRed {{
     border-top-right-radius: 8px;
     border-bottom-right-radius: 8px;
 }}
 
-QRadioButton#backgroundOriginal::indicator,
-QRadioButton#cropPortrait::indicator,
-QRadioButton#cropLandscape::indicator {{
+QRadioButton#backgroundOriginal::indicator {{
     width: 0;
     height: 0;
 }}

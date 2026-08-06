@@ -78,6 +78,40 @@ PNG_FILE_FILTER = "PNG 图像 (*.png)"
 PDF_FILE_FILTER = "PDF 文档 (*.pdf)"
 
 
+def _rotate_image_clockwise(
+    image: Image.Image,
+    quarter_turns: int,
+) -> Image.Image:
+    turns = quarter_turns % 4
+    if turns == 1:
+        return image.transpose(Image.Transpose.ROTATE_270)
+    if turns == 2:
+        return image.transpose(Image.Transpose.ROTATE_180)
+    if turns == 3:
+        return image.transpose(Image.Transpose.ROTATE_90)
+    return image
+
+
+def _rotate_crop_box_clockwise(
+    box: CropBox,
+    image_width: int,
+    image_height: int,
+    quarter_turns: int,
+) -> CropBox:
+    width = float(image_width)
+    height = float(image_height)
+    rotated = box
+    for _ in range(quarter_turns % 4):
+        rotated = CropBox(
+            height - rotated.bottom,
+            rotated.left,
+            height - rotated.top,
+            rotated.right,
+        )
+        width, height = height, width
+    return rotated
+
+
 def _resource_root() -> Path:
     bundle_root = getattr(sys, "_MEIPASS", None)
     if bundle_root is not None:
@@ -164,9 +198,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.specs = _load_specs()
+        self._original_source_image: Image.Image | None = None
         self.source_image: Image.Image | None = None
         self.face: FaceGeometry | None = None
         self.face_count = 0
+        self._crop_rotation_quarters = 0
         self.cropped_original: Image.Image | None = None
         self.finished_photo: Image.Image | None = None
         self.sheet_image: Image.Image | None = None
@@ -365,42 +401,22 @@ class MainWindow(QMainWindow):
         self.reset_crop_button.setToolTip("恢复自动裁剪位置")
         self.reset_crop_button.setEnabled(False)
 
-        self.crop_orientation_group = QButtonGroup(self)
-        self.crop_orientation_group.setExclusive(True)
-        self.crop_portrait_radio = QRadioButton("竖向")
-        self.crop_portrait_radio.setObjectName("cropPortrait")
-        self.crop_portrait_radio.setAccessibleName("竖向裁剪")
-        self.crop_landscape_radio = QRadioButton("横向")
-        self.crop_landscape_radio.setObjectName("cropLandscape")
-        self.crop_landscape_radio.setAccessibleName("横向裁剪")
-        crop_orientation_tooltip = "只改变裁剪方向，不改变 6 寸相纸排版"
-        for radio in (
-            self.crop_portrait_radio,
-            self.crop_landscape_radio,
-        ):
-            radio.setProperty("segment", True)
-            radio.setToolTip(crop_orientation_tooltip)
-            radio.setSizePolicy(
-                QSizePolicy.Policy.Ignored,
-                QSizePolicy.Policy.Fixed,
-            )
-            self.crop_orientation_group.addButton(radio)
-        self.crop_portrait_radio.setChecked(True)
-
-        self.crop_orientation_selector = QWidget()
-        self.crop_orientation_selector.setObjectName("cropOrientationSelector")
-        self.crop_orientation_selector.setFixedWidth(116)
-        crop_orientation_layout = QHBoxLayout(self.crop_orientation_selector)
-        crop_orientation_layout.setContentsMargins(0, 0, 0, 0)
-        crop_orientation_layout.setSpacing(0)
-        crop_orientation_layout.addWidget(self.crop_portrait_radio, 1)
-        crop_orientation_layout.addWidget(self.crop_landscape_radio, 1)
+        self.rotate_crop_button = QPushButton("旋转 90°")
+        self.rotate_crop_button.setProperty("variant", "quiet")
+        self.rotate_crop_button.setAccessibleName(
+            "顺时针旋转照片和裁剪框 90 度"
+        )
+        self.rotate_crop_button.setToolTip(
+            "每次顺时针旋转照片和裁剪框 90°，可连续点击；"
+            "不改变 6 寸相纸排版"
+        )
+        self.rotate_crop_button.setEnabled(False)
 
         crop_header_actions = QWidget()
         crop_header_layout = QHBoxLayout(crop_header_actions)
         crop_header_layout.setContentsMargins(0, 0, 0, 0)
         crop_header_layout.setSpacing(6)
-        crop_header_layout.addWidget(self.crop_orientation_selector)
+        crop_header_layout.addWidget(self.rotate_crop_button)
         crop_header_layout.addWidget(self.reset_crop_button)
 
         self.count_label = QLabel(EMPTY_COUNT_TEXT)
@@ -564,9 +580,7 @@ class MainWindow(QMainWindow):
         self.print_button.clicked.connect(self._print_current_sheet)
         self.reset_crop_button.clicked.connect(self.crop_view.reset_to_auto)
         self.reset_spacing_button.clicked.connect(self._reset_spacing)
-        self.crop_landscape_radio.toggled.connect(
-            self._on_crop_orientation_toggled
-        )
+        self.rotate_crop_button.clicked.connect(self._rotate_crop_clockwise)
         self.crop_view.cropBoxChanged.connect(self._on_crop_box_changed)
         self.crop_view.interactionFinished.connect(
             self._on_crop_interaction_finished
@@ -675,17 +689,25 @@ class MainWindow(QMainWindow):
             with Image.open(path) as opened:
                 source = ImageOps.exif_transpose(opened).convert("RGB")
         except (FileNotFoundError, OSError, ValueError) as error:
+            self._original_source_image = None
             self.source_image = None
+            self._crop_rotation_quarters = 0
             self.face_count = 0
             self._input_warnings = []
             self.crop_view.clear_image()
+            self.rotate_crop_button.setEnabled(False)
             self.reset_crop_button.setEnabled(False)
             self._clear_processed_previews()
             self._set_matting_progress(False)
             self.status_label.setText(f"无法读取照片：{error}")
             return False
 
+        self._original_source_image = source
         self.source_image = source
+        self._crop_rotation_quarters = 0
+        self.face = None
+        self.face_count = 0
+        self.rotate_crop_button.setEnabled(True)
         self.crop_view.set_image(source)
         try:
             detection = detect_face(np.asarray(source))
@@ -715,17 +737,26 @@ class MainWindow(QMainWindow):
         if self.source_image is not None:
             self._refresh_crop()
 
-    def _on_crop_orientation_toggled(self, checked: bool) -> None:
-        del checked
-        if self.source_image is not None:
-            self._refresh_crop()
+    def _rotate_crop_clockwise(self) -> None:
+        if self._original_source_image is None:
+            return
+        self._crop_rotation_quarters = (
+            self._crop_rotation_quarters + 1
+        ) % 4
+        self.source_image = _rotate_image_clockwise(
+            self._original_source_image,
+            self._crop_rotation_quarters,
+        )
+        self._refresh_crop()
 
     def _refresh_crop(self) -> None:
         if self.source_image is None:
             return
+        original_source = self._original_source_image or self.source_image
         self._invalidate_crop_revision()
         target = self._current_target_size()
         aspect_ratio = target.width_mm / target.height_mm
+        standard_target = self._standard_target_size()
         if self.face is not None:
             self._input_warnings = []
             if self.face_count > 1:
@@ -736,15 +767,22 @@ class MainWindow(QMainWindow):
                 self._input_warnings.append(
                     f"头部倾斜 {abs(self.face.roll_degrees):.1f} 度，建议重拍"
                 )
-            if self.face.face_height < minimum_face_height_for_300dpi(target):
+            if self.face.face_height < minimum_face_height_for_300dpi(
+                standard_target
+            ):
                 self._input_warnings.append("人脸太小，裁剪后像素不足")
             result = calculate_crop_box(
                 self.face,
-                self.source_image.width,
-                self.source_image.height,
-                target,
+                original_source.width,
+                original_source.height,
+                standard_target,
             )
-            box = result.box
+            box = _rotate_crop_box_clockwise(
+                result.box,
+                original_source.width,
+                original_source.height,
+                self._crop_rotation_quarters,
+            )
             self._crop_space_warning = (
                 "原图裁剪空间不足，建议重拍留多点余量"
                 if result.insufficient_space
@@ -753,7 +791,19 @@ class MainWindow(QMainWindow):
             self._crop_mode_note = ""
             self.reset_crop_button.setEnabled(True)
         else:
-            box = self._centered_manual_box(aspect_ratio)
+            standard_aspect_ratio = (
+                standard_target.width_mm / standard_target.height_mm
+            )
+            base_box = self._centered_manual_box(
+                standard_aspect_ratio,
+                original_source,
+            )
+            box = _rotate_crop_box_clockwise(
+                base_box,
+                original_source.width,
+                original_source.height,
+                self._crop_rotation_quarters,
+            )
             self._input_warnings = []
             self._crop_space_warning = ""
             self._crop_mode_note = "未检测到人脸，已进入手动裁剪模式"
@@ -769,14 +819,19 @@ class MainWindow(QMainWindow):
         self._update_crop_warning(box, target)
         self._apply_background_selection()
 
-    def _centered_manual_box(self, aspect_ratio: float) -> CropBox:
-        assert self.source_image is not None
-        maximum_width = self.source_image.width * 0.8
-        maximum_height = self.source_image.height * 0.8
+    def _centered_manual_box(
+        self,
+        aspect_ratio: float,
+        image: Image.Image | None = None,
+    ) -> CropBox:
+        source = image or self.source_image
+        assert source is not None
+        maximum_width = source.width * 0.8
+        maximum_height = source.height * 0.8
         width = min(maximum_width, maximum_height * aspect_ratio)
         height = width / aspect_ratio
-        left = (self.source_image.width - width) / 2
-        top = (self.source_image.height - height) / 2
+        left = (source.width - width) / 2
+        top = (source.height - height) / 2
         return CropBox(left, top, left + width, top + height)
 
     def _set_cropped_original(self, box: CropBox) -> None:
@@ -842,12 +897,16 @@ class MainWindow(QMainWindow):
             self._request_matting()
 
     def _current_target_size(self) -> TargetSize:
-        spec = self.specs[self.spec_combo.currentText()]
-        width_mm = spec["width_mm"]
-        height_mm = spec["height_mm"]
-        if self.crop_landscape_radio.isChecked():
+        target = self._standard_target_size()
+        width_mm = target.width_mm
+        height_mm = target.height_mm
+        if self._crop_rotation_quarters % 2:
             width_mm, height_mm = height_mm, width_mm
         return TargetSize(width_mm, height_mm)
+
+    def _standard_target_size(self) -> TargetSize:
+        spec = self.specs[self.spec_combo.currentText()]
+        return TargetSize(spec["width_mm"], spec["height_mm"])
 
     def _on_background_toggled(self, checked: bool) -> None:
         if not checked:
@@ -1017,7 +1076,7 @@ class MainWindow(QMainWindow):
 
         self.sheet_layout = layout
         layout_photo = self.finished_photo
-        if self.crop_landscape_radio.isChecked():
+        if self._crop_rotation_quarters % 2:
             layout_photo = layout_photo.transpose(Image.Transpose.ROTATE_270)
         self.sheet_image = compose_sheet(
             layout_photo,
