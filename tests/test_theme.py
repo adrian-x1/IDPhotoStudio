@@ -115,10 +115,15 @@ class ThemeTests(unittest.TestCase):
                 spec.loader.exec_module(bundled_theme)
 
             self.assertEqual(bundled_theme._ICON_DIR, bundled_icon_dir)
-            self.assertEqual(len(bundled_theme.CONTROL_ICON_PATHS), 6)
+            self.assertEqual(len(bundled_theme.CONTROL_ICON_PATHS), 7)
             for path in bundled_theme.CONTROL_ICON_PATHS.values():
                 with self.subTest(icon=path.name):
                     self.assertTrue(path.is_file())
+
+    def test_add_photo_icon_exists(self) -> None:
+        theme = self.load_theme()
+
+        self.assertTrue(theme.CONTROL_ICON_PATHS["add_photo"].is_file())
 
     def test_stylesheet_keeps_a_one_pixel_amber_focus_state(self) -> None:
         theme = self.load_theme()

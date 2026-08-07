@@ -46,6 +46,7 @@ CONTROL_ICON_PATHS = {
     "checkmark": _ICON_DIR / "checkmark.svg",
     "rotate_left": _ICON_DIR / "rotate-left.svg",
     "rotate_right": _ICON_DIR / "rotate-right.svg",
+    "add_photo": _ICON_DIR / "add-photo.svg",
 }
 
 

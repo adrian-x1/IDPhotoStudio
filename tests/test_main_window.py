@@ -1041,6 +1041,19 @@ class MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window.margin_spin.hasFocus())
 
+    def test_clicking_empty_crop_view_opens_image_chooser(self) -> None:
+        with patch(
+            "ui.main_window.QFileDialog.getOpenFileName",
+            return_value=("", ""),
+        ) as open_dialog:
+            QTest.mouseClick(
+                self.window.crop_view,
+                Qt.MouseButton.LeftButton,
+                pos=self.window.crop_view.rect().center(),
+            )
+
+        open_dialog.assert_called_once()
+
     def test_header_contains_stage_three_output_actions(self) -> None:
         header = getattr(self.window, "header_panel", None)
         output_container = getattr(self.window, "output_actions_container", None)

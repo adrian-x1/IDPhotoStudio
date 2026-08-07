@@ -190,11 +190,43 @@ class CropViewTests(unittest.TestCase):
         self.assertGreater(min(corner_mark.getRgb()[:3]), 230)
         self.assertEqual(diagonal_inside.getRgb()[:3], (80, 100, 120))
 
-    def test_empty_state_uses_short_darkroom_instruction(self) -> None:
+    def test_empty_state_exposes_title_and_helper_text(self) -> None:
+        self.assertEqual(CropView.EMPTY_TITLE, "拖入照片")
         self.assertEqual(
-            CropView.EMPTY_TEXT,
-            "拖入照片，或点击右上导入",
+            CropView.EMPTY_HELPER,
+            "或点击选择 JPG / PNG / WEBP 等",
         )
+
+    def test_empty_state_emits_activation_on_left_click(self) -> None:
+        self.view.clear_image()
+        activated = QSignalSpy(self.view.emptyStateActivated)
+
+        QTest.mouseClick(
+            self.view,
+            Qt.MouseButton.LeftButton,
+            pos=self.view.rect().center(),
+        )
+
+        self.assertEqual(activated.count(), 1)
+
+    def test_empty_state_emits_activation_on_enter(self) -> None:
+        self.view.clear_image()
+        activated = QSignalSpy(self.view.emptyStateActivated)
+
+        QTest.keyClick(self.view, Qt.Key.Key_Return)
+
+        self.assertEqual(activated.count(), 1)
+
+    def test_loaded_image_click_does_not_activate_empty_state(self) -> None:
+        activated = QSignalSpy(self.view.emptyStateActivated)
+
+        QTest.mouseClick(
+            self.view,
+            Qt.MouseButton.LeftButton,
+            pos=self.image_point(400, 480),
+        )
+
+        self.assertEqual(activated.count(), 0)
 
     def test_wheel_scales_from_center_and_emits_both_discrete_signals(self) -> None:
         changed = QSignalSpy(self.view.cropBoxChanged)

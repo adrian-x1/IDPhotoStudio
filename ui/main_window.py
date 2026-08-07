@@ -652,6 +652,7 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.import_button.clicked.connect(self._choose_image)
+        self.crop_view.emptyStateActivated.connect(self._choose_image)
         self.export_png_button.clicked.connect(self._choose_png_destination)
         self.export_pdf_button.clicked.connect(self._choose_pdf_destination)
         self.print_button.clicked.connect(self._print_current_sheet)

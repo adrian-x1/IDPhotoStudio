@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from PIL import Image
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QFont,
+    QIcon,
     QKeyEvent,
     QMouseEvent,
     QPaintEvent,
@@ -23,7 +25,7 @@ from core.crop import (
     integer_crop_bounds,
     is_insufficient_resolution,
 )
-from ui.theme import COLORS
+from ui.theme import COLORS, CONTROL_ICON_PATHS
 
 
 class CropView(QWidget):
@@ -31,6 +33,7 @@ class CropView(QWidget):
 
     cropBoxChanged = Signal(object)
     interactionFinished = Signal(object)
+    emptyStateActivated = Signal()
 
     HANDLE_HIT_RADIUS = 16.0
     MIN_CROP_VIEW_SIZE = 48.0
@@ -38,7 +41,8 @@ class CropView(QWidget):
     FRAME_OPACITY = 0.70
     CORNER_MARK_LENGTH = 18.0
     CORNER_MARK_WIDTH = 2.5
-    EMPTY_TEXT = "拖入照片，或点击右上导入"
+    EMPTY_TITLE = "拖入照片"
+    EMPTY_HELPER = "或点击选择 JPG / PNG / WEBP 等"
 
     _CORNER_SIGNS = {
         "top_left": (-1, -1),
@@ -66,6 +70,7 @@ class CropView(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName("原图裁剪框")
+        self.setAccessibleDescription("拖入照片，或按 Enter、Space 选择照片")
 
     @property
     def crop_box(self) -> CropBox | None:
@@ -161,12 +166,7 @@ class CropView(QWidget):
             self,
         )
         if self._pixmap is None or self._pixmap.isNull():
-            painter.setPen(self.palette().text().color())
-            painter.drawText(
-                self.rect(),
-                Qt.AlignmentFlag.AlignCenter,
-                self.EMPTY_TEXT,
-            )
+            self._paint_empty_state(painter)
             return
 
         image_rect = self._image_rect()
@@ -236,6 +236,42 @@ class CropView(QWidget):
             )
         self._paint_crop_size(painter, image_rect)
 
+    def _paint_empty_state(self, painter: QPainter) -> None:
+        painter.save()
+        icon_size = 40
+        icon_top = self.rect().center().y() - 56
+        icon_left = self.rect().center().x() - icon_size // 2
+        icon = QIcon(str(CONTROL_ICON_PATHS["add_photo"]))
+        painter.drawPixmap(
+            QRect(icon_left, icon_top, icon_size, icon_size),
+            icon.pixmap(icon_size, icon_size),
+        )
+
+        font = painter.font()
+        font.setPixelSize(15)
+        font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(font)
+        painter.setPen(QColor(COLORS["text"]))
+        title_rect = QRect(
+            0,
+            icon_top + icon_size + 10,
+            self.width(),
+            22,
+        )
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, self.EMPTY_TITLE)
+
+        font.setPixelSize(12)
+        font.setWeight(QFont.Weight.Normal)
+        painter.setFont(font)
+        painter.setPen(QColor(COLORS["muted_text"]))
+        helper_rect = QRect(0, title_rect.bottom() + 2, self.width(), 18)
+        painter.drawText(
+            helper_rect,
+            Qt.AlignmentFlag.AlignCenter,
+            self.EMPTY_HELPER,
+        )
+        painter.restore()
+
     def _paint_crop_size(self, painter: QPainter, image_rect: QRectF) -> None:
         text = self.crop_size_text
         if not text:
@@ -261,6 +297,14 @@ class CropView(QWidget):
         painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, text)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and (self._pixmap is None or self._pixmap.isNull())
+        ):
+            self.setFocus()
+            self.emptyStateActivated.emit()
+            event.accept()
+            return
         if (
             event.button() != Qt.MouseButton.LeftButton
             or self._crop_box is None
@@ -317,6 +361,16 @@ class CropView(QWidget):
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if (
+            self._pixmap is None or self._pixmap.isNull()
+        ) and event.key() in (
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        ):
+            self.emptyStateActivated.emit()
+            event.accept()
+            return
         directions = {
             Qt.Key.Key_Left: (-1.0, 0.0),
             Qt.Key.Key_Right: (1.0, 0.0),
