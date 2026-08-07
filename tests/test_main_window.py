@@ -164,15 +164,27 @@ class MainWindowTests(unittest.TestCase):
                 self.assertIsInstance(radio, QRadioButton)
                 self.assertTrue(radio.property("segment"))
 
-    def test_crop_rotation_is_an_accessible_repeatable_button(self) -> None:
-        button = getattr(self.window, "rotate_crop_button", None)
+    def test_rotation_controls_are_accessible_independent_buttons(self) -> None:
+        photo_button = getattr(self.window, "rotate_photo_button", None)
+        frame_button = getattr(self.window, "rotate_crop_frame_button", None)
 
-        self.assertIsNotNone(button)
-        self.assertEqual(button.text(), "旋转 90°")
-        self.assertEqual(button.accessibleName(), "顺时针旋转照片和裁剪框 90 度")
-        self.assertIn("连续点击", button.toolTip())
-        self.assertIn("不改变 6 寸相纸排版", button.toolTip())
-        self.assertFalse(button.isEnabled())
+        self.assertIsNotNone(photo_button)
+        self.assertIsNotNone(frame_button)
+        self.assertEqual(photo_button.text(), "旋转照片")
+        self.assertEqual(frame_button.text(), "旋转裁剪框")
+        self.assertEqual(
+            photo_button.accessibleName(),
+            "顺时针旋转照片 90 度",
+        )
+        self.assertEqual(
+            frame_button.accessibleName(),
+            "顺时针旋转裁剪框 90 度",
+        )
+        self.assertIn("裁剪框方向不变", photo_button.toolTip())
+        self.assertIn("照片方向不变", frame_button.toolTip())
+        self.assertIn("不改变 6 寸相纸排版", frame_button.toolTip())
+        self.assertFalse(photo_button.isEnabled())
+        self.assertFalse(frame_button.isEnabled())
 
     def test_colored_background_segments_show_only_centered_accessible_dots(self) -> None:
         colored_radios = (
@@ -342,13 +354,16 @@ class MainWindowTests(unittest.TestCase):
             12 / 16,
         )
 
-    def test_repeated_rotation_turns_photo_and_crop_frame_without_changing_layout(
+    def test_photo_rotation_repeats_without_changing_crop_ratio_or_layout(
         self,
     ) -> None:
+        self.assertTrue(hasattr(self.window, "rotate_photo_button"))
         self.assertTrue(self.load_portrait())
         original_source = self.window.source_image.copy()
-        expected_box = self.window.crop_view.crop_box
-        expected_width, expected_height = original_source.size
+        original_ratio = (
+            self.window.crop_view.crop_box.width
+            / self.window.crop_view.crop_box.height
+        )
         portrait_layout = self.window.sheet_layout
         portrait_sheet_size = self.window.sheet_image.size
         expected_sources = (
@@ -357,48 +372,109 @@ class MainWindowTests(unittest.TestCase):
             original_source.transpose(Image.Transpose.ROTATE_90),
             original_source,
         )
-        expected_ratios = (35 / 25, 25 / 35, 35 / 25, 25 / 35)
 
-        for expected_source, expected_ratio in zip(
-            expected_sources,
-            expected_ratios,
-            strict=True,
-        ):
-            expected_box = CropBox(
-                expected_height - expected_box.bottom,
-                expected_box.left,
-                expected_height - expected_box.top,
-                expected_box.right,
+        with patch(
+            "ui.main_window.detect_face",
+            return_value=self.detection,
+        ) as detect:
+            for expected_source in expected_sources:
+                self.window.rotate_photo_button.click()
+                self.app.processEvents()
+
+                box = self.window.crop_view.crop_box
+                self.assertEqual(self.window.source_image.size, expected_source.size)
+                self.assertEqual(
+                    self.window.source_image.tobytes(),
+                    expected_source.tobytes(),
+                )
+                self.assertEqual(
+                    (
+                        self.window.crop_view.pixmap().width(),
+                        self.window.crop_view.pixmap().height(),
+                    ),
+                    expected_source.size,
+                )
+                self.assertAlmostEqual(box.width / box.height, original_ratio)
+                self.assertEqual(self.window.sheet_layout, portrait_layout)
+                self.assertEqual(self.window.sheet_image.size, portrait_sheet_size)
+
+        self.assertEqual(detect.call_count, 4)
+        self.assertEqual(
+            [call.args[0].shape[:2] for call in detect.call_args_list],
+            [(1000, 1200), (1200, 1000), (1000, 1200), (1200, 1000)],
+        )
+
+    def test_crop_frame_rotation_swaps_ratio_without_rotating_photo(self) -> None:
+        self.assertTrue(hasattr(self.window, "rotate_crop_frame_button"))
+        self.assertTrue(self.load_portrait())
+        source_bytes = self.window.source_image.tobytes()
+        portrait_layout = self.window.sheet_layout
+        portrait_sheet_size = self.window.sheet_image.size
+
+        with patch("ui.main_window.detect_face") as detect:
+            self.window.rotate_crop_frame_button.click()
+            self.app.processEvents()
+            self.assertEqual(self.window.source_image.tobytes(), source_bytes)
+            self.assertAlmostEqual(
+                self.window.crop_view.crop_box.width
+                / self.window.crop_view.crop_box.height,
+                35 / 25,
             )
-            expected_width, expected_height = expected_height, expected_width
-            self.window.rotate_crop_button.click()
+            self.assertGreater(
+                self.window.finished_photo.width,
+                self.window.finished_photo.height,
+            )
+            self.window.rotate_crop_frame_button.click()
             self.app.processEvents()
 
-            box = self.window.crop_view.crop_box
-            for field in ("left", "top", "right", "bottom"):
-                self.assertAlmostEqual(
-                    getattr(box, field),
-                    getattr(expected_box, field),
-                )
-            self.assertEqual(self.window.source_image.size, expected_source.size)
-            self.assertEqual(
-                self.window.source_image.tobytes(),
-                expected_source.tobytes(),
-            )
-            self.assertEqual(
-                (
-                    self.window.crop_view.pixmap().width(),
-                    self.window.crop_view.pixmap().height(),
-                ),
-                expected_source.size,
-            )
-            self.assertAlmostEqual(box.width / box.height, expected_ratio)
-            self.assertEqual(self.window.sheet_layout, portrait_layout)
-            self.assertEqual(self.window.sheet_image.size, portrait_sheet_size)
+        detect.assert_not_called()
+        self.assertEqual(self.window.source_image.tobytes(), source_bytes)
+        self.assertAlmostEqual(
+            self.window.crop_view.crop_box.width
+            / self.window.crop_view.crop_box.height,
+            25 / 35,
+        )
+        self.assertEqual(self.window.sheet_layout, portrait_layout)
+        self.assertEqual(self.window.sheet_image.size, portrait_sheet_size)
+
+    def test_combined_rotations_keep_independent_state_and_sheet_layout(self) -> None:
+        self.assertTrue(self.load_portrait())
+        original_source = self.window.source_image.copy()
+        original_layout = self.window.sheet_layout
+        original_sheet_size = self.window.sheet_image.size
+
+        with patch("ui.main_window.detect_face", return_value=self.detection):
+            for _ in range(3):
+                self.window.rotate_photo_button.click()
+        self.window.rotate_crop_frame_button.click()
+        self.app.processEvents()
+
+        self.assertEqual(
+            self.window.source_image.tobytes(),
+            original_source.transpose(Image.Transpose.ROTATE_90).tobytes(),
+        )
+        self.assertAlmostEqual(
+            self.window.crop_view.crop_box.width
+            / self.window.crop_view.crop_box.height,
+            35 / 25,
+        )
+        self.assertEqual(self.window.sheet_layout, original_layout)
+        self.assertEqual(self.window.sheet_image.size, original_sheet_size)
+        expected_sheet = compose_sheet(
+            self.window.finished_photo.transpose(Image.Transpose.ROTATE_270),
+            25,
+            35,
+            original_layout,
+            gap=self.window.gap_spin.value(),
+            draw_cut_lines=self.window.cut_lines_check.isChecked(),
+        )
+        self.assertEqual(self.window.sheet_image.tobytes(), expected_sheet.tobytes())
 
     def test_rotation_persists_across_specs_and_resets_for_a_new_image(self) -> None:
         self.assertTrue(self.load_portrait())
-        self.window.rotate_crop_button.click()
+        with patch("ui.main_window.detect_face", return_value=self.detection):
+            self.window.rotate_photo_button.click()
+        self.window.rotate_crop_frame_button.click()
 
         self.window.spec_combo.setCurrentText("英语四六级")
         self.app.processEvents()
@@ -420,7 +496,8 @@ class MainWindowTests(unittest.TestCase):
     def test_missing_face_uses_centered_landscape_manual_crop(self) -> None:
         with patch("ui.main_window.detect_face", return_value=None):
             self.assertFalse(self.window.load_image(self.image_path))
-        self.window.rotate_crop_button.click()
+            self.window.rotate_photo_button.click()
+        self.window.rotate_crop_frame_button.click()
         self.app.processEvents()
 
         box = self.window.crop_view.crop_box
@@ -432,7 +509,9 @@ class MainWindowTests(unittest.TestCase):
 
     def test_reset_crop_keeps_current_rotation(self) -> None:
         self.assertTrue(self.load_portrait())
-        self.window.rotate_crop_button.click()
+        with patch("ui.main_window.detect_face", return_value=self.detection):
+            self.window.rotate_photo_button.click()
+        self.window.rotate_crop_frame_button.click()
         automatic_box = self.window.crop_view.crop_box
         moved_box = CropBox(
             automatic_box.left,
@@ -446,6 +525,11 @@ class MainWindowTests(unittest.TestCase):
         self.app.processEvents()
 
         self.assertEqual(self.window.source_image.size, (1200, 1000))
+        self.assertAlmostEqual(
+            self.window.crop_view.crop_box.width
+            / self.window.crop_view.crop_box.height,
+            35 / 25,
+        )
         self.assertEqual(self.window.crop_view.crop_box, automatic_box)
 
     def test_original_background_crop_changes_refresh_immediately_with_core_warning(self) -> None:
@@ -542,6 +626,8 @@ class MainWindowTests(unittest.TestCase):
 
         self.assertFalse(self.window.load_image(bad_path))
         self.assertIn("无法读取照片", self.window.status_label.text())
+        self.assertFalse(self.window.rotate_photo_button.isEnabled())
+        self.assertFalse(self.window.rotate_crop_frame_button.isEnabled())
 
         with patch("ui.main_window.detect_face", return_value=None):
             self.assertFalse(self.window.load_image(self.image_path))
@@ -553,6 +639,34 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(self.window.sheet_preview.pixmap().isNull())
         self.assertEqual(self.window.count_label.text(), "共 12 张")
         self.assertFalse(self.window.reset_crop_button.isEnabled())
+        self.assertTrue(self.window.rotate_photo_button.isEnabled())
+        self.assertTrue(self.window.rotate_crop_frame_button.isEnabled())
+
+    def test_photo_rotation_detection_failure_uses_recoverable_error_state(
+        self,
+    ) -> None:
+        self.assertTrue(self.load_portrait())
+
+        with patch(
+            "ui.main_window.detect_face",
+            side_effect=RuntimeError("model unavailable"),
+        ):
+            self.window.rotate_photo_button.click()
+        self.app.processEvents()
+
+        self.assertEqual(self.window.source_image.size, (1200, 1000))
+        self.assertEqual(
+            (
+                self.window.crop_view.pixmap().width(),
+                self.window.crop_view.pixmap().height(),
+            ),
+            (1200, 1000),
+        )
+        self.assertIn("人脸检测失败", self.window.status_label.text())
+        self.assertIsNone(self.window.crop_view.crop_box)
+        self.assertIsNone(self.window.sheet_image)
+        self.assertTrue(self.window.rotate_photo_button.isEnabled())
+        self.assertTrue(self.window.rotate_crop_frame_button.isEnabled())
 
     def test_multiple_faces_show_non_blocking_largest_face_notice(self) -> None:
         detection = FaceDetectionResult(self.face, 2)
@@ -694,7 +808,12 @@ class MainWindowTests(unittest.TestCase):
                 (67, 142, 219),
             )
 
-    def test_rotation_discards_stale_matting_result(self) -> None:
+    def _assert_rotation_discards_stale_matting_result(
+        self,
+        button_name: str,
+        *,
+        expect_landscape: bool,
+    ) -> None:
         self.assertTrue(self.load_portrait())
         first_started = threading.Event()
         first_release = threading.Event()
@@ -721,14 +840,20 @@ class MainWindowTests(unittest.TestCase):
             self.window.blue_background_radio.setChecked(True)
             self.wait_until(first_started.is_set)
 
-            self.window.rotate_crop_button.click()
+            if button_name == "rotate_photo_button":
+                with patch(
+                    "ui.main_window.detect_face",
+                    return_value=self.detection,
+                ):
+                    getattr(self.window, button_name).click()
+            else:
+                getattr(self.window, button_name).click()
             self.app.processEvents()
             first_release.set()
             self.wait_until(second_started.is_set)
 
             self.assertEqual(len(call_sizes), 2)
             self.assertLess(call_sizes[0][0], call_sizes[0][1])
-            self.assertGreater(call_sizes[1][0], call_sizes[1][1])
             self.assertEqual(
                 self.window.finished_photo.getpixel((0, 0)),
                 self.window.cropped_original.getpixel((0, 0)),
@@ -737,11 +862,29 @@ class MainWindowTests(unittest.TestCase):
             second_release.set()
             self.wait_until(lambda: not self.window.progress_bar.isVisible())
 
-        self.assertGreater(
-            self.window.finished_photo.width,
-            self.window.finished_photo.height,
-        )
+        if expect_landscape:
+            self.assertGreater(
+                self.window.finished_photo.width,
+                self.window.finished_photo.height,
+            )
+        else:
+            self.assertLess(
+                self.window.finished_photo.width,
+                self.window.finished_photo.height,
+            )
         self.assertEqual(self.window.finished_photo.getpixel((0, 0)), (67, 142, 219))
+
+    def test_photo_rotation_discards_stale_matting_result(self) -> None:
+        self._assert_rotation_discards_stale_matting_result(
+            "rotate_photo_button",
+            expect_landscape=False,
+        )
+
+    def test_crop_frame_rotation_discards_stale_matting_result(self) -> None:
+        self._assert_rotation_discards_stale_matting_result(
+            "rotate_crop_frame_button",
+            expect_landscape=True,
+        )
 
     def test_matting_failure_restores_original_background_with_retry_message(self) -> None:
         self.assertTrue(self.load_portrait())
