@@ -398,8 +398,10 @@ class MainWindow(QMainWindow):
 
         self.reset_crop_button = QPushButton("重置")
         self.reset_crop_button.setProperty("variant", "quiet")
-        self.reset_crop_button.setAccessibleName("重置裁剪框为自动位置")
-        self.reset_crop_button.setToolTip("恢复自动裁剪位置")
+        self.reset_crop_button.setAccessibleName(
+            "重置照片角度、裁剪方向和 AI 裁剪框"
+        )
+        self.reset_crop_button.setToolTip("恢复原始照片和 AI 初始裁剪位置")
         self.reset_crop_button.setFixedWidth(44)
         self.reset_crop_button.setEnabled(False)
 
@@ -688,7 +690,7 @@ class MainWindow(QMainWindow):
             self._choose_sheet_pdf_destination
         )
         self.print_button.clicked.connect(self._print_current_sheet)
-        self.reset_crop_button.clicked.connect(self.crop_view.reset_to_auto)
+        self.reset_crop_button.clicked.connect(self._reset_to_ai_initial)
         self.reset_spacing_button.clicked.connect(self._reset_spacing)
         self.rotate_photo_left_button.clicked.connect(self._rotate_photo_left)
         self.rotate_photo_right_button.clicked.connect(self._rotate_photo_right)
@@ -942,6 +944,17 @@ class MainWindow(QMainWindow):
 
     def _rotate_photo_right(self) -> None:
         self._rotate_photo(1)
+
+    def _reset_to_ai_initial(self) -> None:
+        if self._original_source_image is None:
+            return
+        self._invalidate_crop_revision()
+        self._photo_rotation_quarters = 0
+        self._crop_orientation_landscape = False
+        self.portrait_crop_radio.setChecked(True)
+        self.source_image = self._original_source_image
+        self.crop_view.set_image(self.source_image)
+        self._detect_current_face_and_refresh()
 
     def _rotate_photo(self, quarter_delta: int) -> None:
         if self._original_source_image is None:

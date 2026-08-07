@@ -388,8 +388,9 @@ class MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertNotEqual(self.window.crop_view.crop_box, original_auto)
 
-        self.window.reset_crop_button.click()
-        self.app.processEvents()
+        with patch("ui.main_window.detect_face", return_value=self.detection):
+            self.window.reset_crop_button.click()
+            self.app.processEvents()
         self.assertEqual(self.window.crop_view.crop_box, original_auto)
 
         self.window.spec_combo.setCurrentText("英语四六级")
@@ -603,30 +604,108 @@ class MainWindowTests(unittest.TestCase):
         self.assertLessEqual(box.right, self.window.source_image.width)
         self.assertLessEqual(box.bottom, self.window.source_image.height)
 
-    def test_reset_crop_keeps_current_rotation(self) -> None:
+    def test_reset_restores_original_photo_portrait_ai_crop(self) -> None:
         self.assertTrue(self.load_portrait())
-        with patch("ui.main_window.detect_face", return_value=self.detection):
+        original_source = self.window.source_image.copy()
+        self.window.spec_combo.setCurrentText("三寸")
+        self.window.gap_spin.setValue(2.0)
+        self.window.margin_spin.setValue(2.0)
+        self.window.cut_lines_check.setChecked(False)
+        with patch("ui.main_window.detect_face", return_value=self.detection) as detect:
             self.window.rotate_photo_right_button.click()
-        self.window.landscape_crop_radio.click()
-        automatic_box = self.window.crop_view.crop_box
-        moved_box = CropBox(
-            automatic_box.left,
-            automatic_box.top + 10,
-            automatic_box.right,
-            automatic_box.bottom + 10,
-        )
-        self.window.crop_view.cropBoxChanged.emit(moved_box)
+            self.window.landscape_crop_radio.click()
+            automatic_box = self.window.crop_view.crop_box
+            self.window.crop_view.cropBoxChanged.emit(
+                CropBox(
+                    automatic_box.left,
+                    automatic_box.top + 10,
+                    automatic_box.right,
+                    automatic_box.bottom + 10,
+                )
+            )
 
-        self.window.reset_crop_button.click()
-        self.app.processEvents()
+            self.window.reset_crop_button.click()
+            self.app.processEvents()
 
-        self.assertEqual(self.window.source_image.size, (1200, 1000))
-        self.assertAlmostEqual(
-            self.window.crop_view.crop_box.width
-            / self.window.crop_view.crop_box.height,
-            35 / 25,
+        expected_box = calculate_crop_box(
+            self.face,
+            original_source.width,
+            original_source.height,
+            TargetSize(55, 84),
+        ).box
+        self.assertEqual(self.window.source_image.tobytes(), original_source.tobytes())
+        self.assertEqual(self.window._photo_rotation_quarters, 0)
+        self.assertFalse(self.window._crop_orientation_landscape)
+        self.assertTrue(self.window.portrait_crop_radio.isChecked())
+        self.assertFalse(self.window.landscape_crop_radio.isChecked())
+        self.assertEqual(self.window.crop_view.crop_box, expected_box)
+        self.assertEqual(self.window.spec_combo.currentText(), "三寸")
+        self.assertEqual(self.window.gap_spin.value(), 2.0)
+        self.assertEqual(self.window.margin_spin.value(), 2.0)
+        self.assertFalse(self.window.cut_lines_check.isChecked())
+        self.assertEqual(detect.call_count, 2)
+
+    def test_reset_discards_stale_matting_result(self) -> None:
+        self.assertTrue(self.load_portrait())
+        first_started = threading.Event()
+        first_release = threading.Event()
+        second_started = threading.Event()
+        second_release = threading.Event()
+        call_sizes: list[tuple[int, int]] = []
+
+        def controlled_extract(image: Image.Image) -> Image.Image:
+            call_sizes.append(image.size)
+            if len(call_sizes) == 1:
+                first_started.set()
+                if not first_release.wait(3):
+                    raise TimeoutError("test did not release first worker")
+            else:
+                second_started.set()
+                if not second_release.wait(3):
+                    raise TimeoutError("test did not release second worker")
+            return Image.new("RGBA", image.size, (0, 0, 0, 0))
+
+        with patch(
+            "ui.matting_worker.extract_foreground",
+            side_effect=controlled_extract,
+        ):
+            with patch("ui.main_window.detect_face", return_value=self.detection):
+                self.window.rotate_photo_right_button.click()
+                self.window.landscape_crop_radio.click()
+            automatic_box = self.window.crop_view.crop_box
+            self.window.crop_view.cropBoxChanged.emit(
+                CropBox(
+                    automatic_box.left,
+                    automatic_box.top + 10,
+                    automatic_box.right,
+                    automatic_box.bottom + 10,
+                )
+            )
+            self.window.blue_background_radio.setChecked(True)
+            self.wait_until(first_started.is_set)
+
+            with patch("ui.main_window.detect_face", return_value=self.detection):
+                self.window.reset_crop_button.click()
+            self.app.processEvents()
+            first_release.set()
+            self.wait_until(second_started.is_set)
+
+            self.assertEqual(len(call_sizes), 2)
+            self.assertEqual(self.window._photo_rotation_quarters, 0)
+            self.assertTrue(self.window.portrait_crop_radio.isChecked())
+            self.assertEqual(
+                self.window.finished_photo.getpixel((0, 0)),
+                self.window.cropped_original.getpixel((0, 0)),
+            )
+
+            second_release.set()
+            self.wait_until(lambda: not self.window.progress_bar.isVisible())
+
+        self.assertEqual(self.window.finished_photo.getpixel((0, 0)), (67, 142, 219))
+        self.assertLess(
+            self.window.finished_photo.width,
+            self.window.finished_photo.height,
         )
-        self.assertEqual(self.window.crop_view.crop_box, automatic_box)
 
     def test_original_background_crop_changes_refresh_immediately_with_core_warning(self) -> None:
         self.assertTrue(self.load_portrait())
