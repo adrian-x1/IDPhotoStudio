@@ -286,7 +286,7 @@ QPushButton:disabled {{
 
 QToolButton {{
     min-height: 34px;
-    padding: 0 26px 0 14px;
+    padding: 0 14px 0 5px;
     color: {COLORS["text"]};
     background: {COLORS["control"]};
     border: 1px solid {COLORS["border"]};
@@ -312,7 +312,7 @@ QToolButton::menu-indicator {{
     image: url({_icon_url("chevron_down")});
     subcontrol-origin: padding;
     subcontrol-position: right center;
-    right: 10px;
+    right: 6px;
     width: 10px;
     height: 6px;
 }}

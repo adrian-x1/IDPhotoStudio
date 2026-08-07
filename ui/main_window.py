@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         self.export_button.setToolButtonStyle(
             Qt.ToolButtonStyle.ToolButtonTextOnly
         )
-        self.export_button.setMinimumHeight(36)
+        self.export_button.setFixedHeight(36)
         self.export_menu = QMenu(self.export_button)
         photo_section = QAction("单张证件照", self.export_menu)
         photo_section.setEnabled(False)

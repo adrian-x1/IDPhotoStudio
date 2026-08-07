@@ -1160,6 +1160,18 @@ class MainWindowTests(unittest.TestCase):
             ["导出 JPEG", "导出 PNG", "导出 JPEG", "导出 PNG", "导出 PDF"],
         )
 
+    def test_header_action_buttons_use_equal_visual_size(self) -> None:
+        buttons = (
+            self.window.import_button,
+            self.window.export_button,
+            self.window.print_button,
+        )
+
+        self.assertEqual(
+            [button.size() for button in buttons],
+            [buttons[0].size()] * len(buttons),
+        )
+
     def test_output_actions_follow_photo_and_sheet_data_independently(self) -> None:
         photo_actions = (
             self.window.export_photo_jpeg_action,
