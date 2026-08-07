@@ -1166,11 +1166,44 @@ class MainWindowTests(unittest.TestCase):
             self.window.export_button,
             self.window.print_button,
         )
+        layout_widgets = (
+            self.window.import_button,
+            self.window.export_button_container,
+            self.window.print_button,
+        )
+        header_layout = self.window.header_panel.layout()
 
         self.assertEqual(
             [button.size() for button in buttons],
             [buttons[0].size()] * len(buttons),
         )
+        self.assertTrue(
+            all(
+                next(
+                    header_layout.itemAt(index)
+                    for index in range(header_layout.count())
+                    if header_layout.itemAt(index).widget() is button
+                ).alignment()
+                & Qt.AlignmentFlag.AlignVCenter
+                for button in layout_widgets
+            )
+        )
+
+    def test_cocoa_header_action_buttons_share_the_same_top_edge(self) -> None:
+        if QApplication.platformName() != "cocoa":
+            self.skipTest("macOS Cocoa layout regression")
+
+        buttons = (
+            self.window.import_button,
+            self.window.export_button,
+            self.window.print_button,
+        )
+        top_edges = [
+            button.mapTo(self.window.header_panel, QPoint()).y()
+            for button in buttons
+        ]
+
+        self.assertEqual(top_edges, [top_edges[0]] * len(buttons))
 
     def test_output_actions_follow_photo_and_sheet_data_independently(self) -> None:
         photo_actions = (

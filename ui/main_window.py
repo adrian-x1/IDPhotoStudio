@@ -238,7 +238,9 @@ class MainWindow(QMainWindow):
         self.import_button = QPushButton("导入")
         self.import_button.setMinimumHeight(36)
         self.import_button.setAccessibleName("导入照片")
-        header_layout.addWidget(self.import_button)
+        header_layout.addWidget(
+            self.import_button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
 
         self.export_button = QToolButton()
         self.export_button.setText("导出")
@@ -265,7 +267,18 @@ class MainWindow(QMainWindow):
         self.export_sheet_png_action = self.export_menu.addAction("导出 PNG")
         self.export_sheet_pdf_action = self.export_menu.addAction("导出 PDF")
         self.export_button.setMenu(self.export_menu)
-        header_layout.addWidget(self.export_button)
+
+        self.export_button_container: QWidget = self.export_button
+        if QApplication.platformName() == "cocoa":
+            self.export_button_container = QWidget()
+            self.export_button_container.setFixedHeight(40)
+            export_button_layout = QHBoxLayout(self.export_button_container)
+            export_button_layout.setContentsMargins(0, 4, 0, 0)
+            export_button_layout.setSpacing(0)
+            export_button_layout.addWidget(self.export_button)
+        header_layout.addWidget(
+            self.export_button_container, 0, Qt.AlignmentFlag.AlignVCenter
+        )
 
         self.header_separator = QFrame()
         self.header_separator.setObjectName("outputSeparator")
@@ -277,7 +290,9 @@ class MainWindow(QMainWindow):
         self.print_button.setAccessibleName("打印")
         self.print_button.setProperty("variant", "primary")
         self.print_button.setMinimumHeight(36)
-        header_layout.addWidget(self.print_button)
+        header_layout.addWidget(
+            self.print_button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
 
         self._refresh_output_actions_enabled()
         root.addWidget(self.header_panel)
