@@ -9,13 +9,14 @@ import sys
 import numpy as np
 from PIL import Image, ImageOps
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QMimeData, QThreadPool, Qt
+from PySide6.QtCore import QMimeData, QSize, QThreadPool, Qt
 from PySide6.QtGui import (
     QColor,
     QCloseEvent,
     QDragEnterEvent,
     QDragLeaveEvent,
     QDropEvent,
+    QIcon,
     QPixmap,
     QResizeEvent,
 )
@@ -56,7 +57,7 @@ from core.matting import composite_background
 from ui.crop_view import CropView
 from ui.matting_worker import MattingWorker
 from ui.printing import PrintOutcome, print_sheet
-from ui.theme import apply_theme
+from ui.theme import CONTROL_ICON_PATHS, apply_theme
 
 
 ORIGINAL_BACKGROUND = "保持原底"
@@ -183,7 +184,7 @@ class MainWindow(QMainWindow):
         self.face: FaceGeometry | None = None
         self.face_count = 0
         self._photo_rotation_quarters = 0
-        self._crop_rotation_quarters = 0
+        self._crop_orientation_landscape = False
         self.cropped_original: Image.Image | None = None
         self.finished_photo: Image.Image | None = None
         self.sheet_image: Image.Image | None = None
@@ -380,35 +381,119 @@ class MainWindow(QMainWindow):
         self.reset_crop_button.setProperty("variant", "quiet")
         self.reset_crop_button.setAccessibleName("重置裁剪框为自动位置")
         self.reset_crop_button.setToolTip("恢复自动裁剪位置")
+        self.reset_crop_button.setFixedWidth(40)
         self.reset_crop_button.setEnabled(False)
 
-        self.rotate_photo_button = QPushButton("旋转照片")
-        self.rotate_photo_button.setProperty("variant", "quiet")
-        self.rotate_photo_button.setAccessibleName(
-            "顺时针旋转照片 90 度"
-        )
-        self.rotate_photo_button.setToolTip(
-            "每次顺时针旋转照片 90°，可连续点击；裁剪框方向不变"
-        )
-        self.rotate_photo_button.setEnabled(False)
+        self.photo_rotation_control = QFrame()
+        self.photo_rotation_control.setProperty("segmentedControl", True)
+        self.photo_rotation_control.setAccessibleName("照片旋转")
+        self.photo_rotation_control.setFixedWidth(76)
+        photo_rotation_layout = QHBoxLayout(self.photo_rotation_control)
+        photo_rotation_layout.setContentsMargins(1, 1, 1, 1)
+        photo_rotation_layout.setSpacing(0)
 
-        self.rotate_crop_frame_button = QPushButton("旋转裁剪框")
-        self.rotate_crop_frame_button.setProperty("variant", "quiet")
-        self.rotate_crop_frame_button.setAccessibleName(
-            "顺时针旋转裁剪框 90 度"
+        self.rotate_photo_left_button = QPushButton("")
+        self.rotate_photo_left_button.setProperty("segmentItem", True)
+        self.rotate_photo_left_button.setIcon(
+            QIcon(str(CONTROL_ICON_PATHS["rotate_left"]))
         )
-        self.rotate_crop_frame_button.setToolTip(
-            "每次顺时针旋转裁剪框 90°，照片方向不变；"
-            "不改变 6 寸相纸排版"
+        self.rotate_photo_left_button.setIconSize(QSize(16, 16))
+        self.rotate_photo_left_button.setAccessibleName(
+            "向左旋转照片 90 度"
         )
-        self.rotate_crop_frame_button.setEnabled(False)
+        self.rotate_photo_left_button.setToolTip(
+            "照片向左旋转 90°；裁剪框方向不变，可连续点击"
+        )
+        self.rotate_photo_left_button.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus
+        )
+        self.rotate_photo_left_button.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.rotate_photo_left_button.setEnabled(False)
+
+        self.photo_rotation_divider = QFrame()
+        self.photo_rotation_divider.setProperty("segmentDivider", True)
+        self.photo_rotation_divider.setFrameShape(QFrame.Shape.VLine)
+        self.photo_rotation_divider.setFixedWidth(1)
+
+        self.rotate_photo_right_button = QPushButton("")
+        self.rotate_photo_right_button.setProperty("segmentItem", True)
+        self.rotate_photo_right_button.setIcon(
+            QIcon(str(CONTROL_ICON_PATHS["rotate_right"]))
+        )
+        self.rotate_photo_right_button.setIconSize(QSize(16, 16))
+        self.rotate_photo_right_button.setAccessibleName(
+            "向右旋转照片 90 度"
+        )
+        self.rotate_photo_right_button.setToolTip(
+            "照片向右旋转 90°；裁剪框方向不变，可连续点击"
+        )
+        self.rotate_photo_right_button.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus
+        )
+        self.rotate_photo_right_button.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.rotate_photo_right_button.setEnabled(False)
+        photo_rotation_layout.addWidget(self.rotate_photo_left_button)
+        photo_rotation_layout.addWidget(self.photo_rotation_divider)
+        photo_rotation_layout.addWidget(self.rotate_photo_right_button)
+
+        self.crop_orientation_control = QFrame()
+        self.crop_orientation_control.setProperty("segmentedControl", True)
+        self.crop_orientation_control.setAccessibleName("裁剪框方向")
+        self.crop_orientation_control.setFixedWidth(86)
+        crop_orientation_layout = QHBoxLayout(self.crop_orientation_control)
+        crop_orientation_layout.setContentsMargins(1, 1, 1, 1)
+        crop_orientation_layout.setSpacing(0)
+
+        self.crop_orientation_group = QButtonGroup(self)
+        self.portrait_crop_radio = QRadioButton("竖版")
+        self.portrait_crop_radio.setProperty("segmentItem", True)
+        self.portrait_crop_radio.setAccessibleName("竖版裁剪框")
+        self.portrait_crop_radio.setToolTip(
+            "使用竖版裁剪框；照片方向不变，不改变 6 寸相纸排版"
+        )
+        self.portrait_crop_radio.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.portrait_crop_radio.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.portrait_crop_radio.setEnabled(False)
+
+        self.crop_orientation_divider = QFrame()
+        self.crop_orientation_divider.setProperty("segmentDivider", True)
+        self.crop_orientation_divider.setFrameShape(QFrame.Shape.VLine)
+        self.crop_orientation_divider.setFixedWidth(1)
+
+        self.landscape_crop_radio = QRadioButton("横版")
+        self.landscape_crop_radio.setProperty("segmentItem", True)
+        self.landscape_crop_radio.setAccessibleName("横版裁剪框")
+        self.landscape_crop_radio.setToolTip(
+            "使用横版裁剪框；照片方向不变，不改变 6 寸相纸排版"
+        )
+        self.landscape_crop_radio.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.landscape_crop_radio.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.landscape_crop_radio.setEnabled(False)
+        for radio in (self.portrait_crop_radio, self.landscape_crop_radio):
+            self.crop_orientation_group.addButton(radio)
+        self.portrait_crop_radio.setChecked(True)
+        crop_orientation_layout.addWidget(self.portrait_crop_radio)
+        crop_orientation_layout.addWidget(self.crop_orientation_divider)
+        crop_orientation_layout.addWidget(self.landscape_crop_radio)
 
         crop_header_actions = QWidget()
         crop_header_layout = QHBoxLayout(crop_header_actions)
         crop_header_layout.setContentsMargins(0, 0, 0, 0)
         crop_header_layout.setSpacing(6)
-        crop_header_layout.addWidget(self.rotate_photo_button)
-        crop_header_layout.addWidget(self.rotate_crop_frame_button)
+        crop_header_layout.addWidget(self.photo_rotation_control)
+        crop_header_layout.addWidget(self.crop_orientation_control)
         crop_header_layout.addWidget(self.reset_crop_button)
 
         self.count_label = QLabel(EMPTY_COUNT_TEXT)
@@ -572,9 +657,13 @@ class MainWindow(QMainWindow):
         self.print_button.clicked.connect(self._print_current_sheet)
         self.reset_crop_button.clicked.connect(self.crop_view.reset_to_auto)
         self.reset_spacing_button.clicked.connect(self._reset_spacing)
-        self.rotate_photo_button.clicked.connect(self._rotate_photo_clockwise)
-        self.rotate_crop_frame_button.clicked.connect(
-            self._rotate_crop_frame_clockwise
+        self.rotate_photo_left_button.clicked.connect(self._rotate_photo_left)
+        self.rotate_photo_right_button.clicked.connect(self._rotate_photo_right)
+        self.portrait_crop_radio.toggled.connect(
+            self._on_crop_orientation_toggled
+        )
+        self.landscape_crop_radio.toggled.connect(
+            self._on_crop_orientation_toggled
         )
         self.crop_view.cropBoxChanged.connect(self._on_crop_box_changed)
         self.crop_view.interactionFinished.connect(
@@ -687,12 +776,12 @@ class MainWindow(QMainWindow):
             self._original_source_image = None
             self.source_image = None
             self._photo_rotation_quarters = 0
-            self._crop_rotation_quarters = 0
+            self._crop_orientation_landscape = False
+            self.portrait_crop_radio.setChecked(True)
             self.face_count = 0
             self._input_warnings = []
             self.crop_view.clear_image()
-            self.rotate_photo_button.setEnabled(False)
-            self.rotate_crop_frame_button.setEnabled(False)
+            self._set_rotation_controls_enabled(False)
             self.reset_crop_button.setEnabled(False)
             self._clear_processed_previews()
             self._set_matting_progress(False)
@@ -702,13 +791,22 @@ class MainWindow(QMainWindow):
         self._original_source_image = source
         self.source_image = source
         self._photo_rotation_quarters = 0
-        self._crop_rotation_quarters = 0
+        self._crop_orientation_landscape = False
+        self.portrait_crop_radio.setChecked(True)
         self.face = None
         self.face_count = 0
-        self.rotate_photo_button.setEnabled(True)
-        self.rotate_crop_frame_button.setEnabled(True)
+        self._set_rotation_controls_enabled(True)
         self.crop_view.set_image(source)
         return self._detect_current_face_and_refresh()
+
+    def _set_rotation_controls_enabled(self, enabled: bool) -> None:
+        for control in (
+            self.rotate_photo_left_button,
+            self.rotate_photo_right_button,
+            self.portrait_crop_radio,
+            self.landscape_crop_radio,
+        ):
+            control.setEnabled(enabled)
 
     def _detect_current_face_and_refresh(self) -> bool:
         assert self.source_image is not None
@@ -740,12 +838,18 @@ class MainWindow(QMainWindow):
         if self.source_image is not None:
             self._refresh_crop()
 
-    def _rotate_photo_clockwise(self) -> None:
+    def _rotate_photo_left(self) -> None:
+        self._rotate_photo(-1)
+
+    def _rotate_photo_right(self) -> None:
+        self._rotate_photo(1)
+
+    def _rotate_photo(self, quarter_delta: int) -> None:
         if self._original_source_image is None:
             return
         self._invalidate_crop_revision()
         self._photo_rotation_quarters = (
-            self._photo_rotation_quarters + 1
+            self._photo_rotation_quarters + quarter_delta
         ) % 4
         self.source_image = _rotate_image_clockwise(
             self._original_source_image,
@@ -754,12 +858,13 @@ class MainWindow(QMainWindow):
         self.crop_view.set_image(self.source_image)
         self._detect_current_face_and_refresh()
 
-    def _rotate_crop_frame_clockwise(self) -> None:
-        if self.source_image is None:
+    def _on_crop_orientation_toggled(self, checked: bool) -> None:
+        if not checked or self.source_image is None:
             return
-        self._crop_rotation_quarters = (
-            self._crop_rotation_quarters + 1
-        ) % 2
+        landscape = self.landscape_crop_radio.isChecked()
+        if landscape == self._crop_orientation_landscape:
+            return
+        self._crop_orientation_landscape = landscape
         self._refresh_crop()
 
     def _refresh_crop(self) -> None:
@@ -887,7 +992,7 @@ class MainWindow(QMainWindow):
         target = self._standard_target_size()
         width_mm = target.width_mm
         height_mm = target.height_mm
-        if self._crop_rotation_quarters % 2:
+        if self._crop_orientation_landscape:
             width_mm, height_mm = height_mm, width_mm
         return TargetSize(width_mm, height_mm)
 
@@ -1063,7 +1168,7 @@ class MainWindow(QMainWindow):
 
         self.sheet_layout = layout
         layout_photo = self.finished_photo
-        if self._crop_rotation_quarters % 2:
+        if self._crop_orientation_landscape:
             layout_photo = layout_photo.transpose(Image.Transpose.ROTATE_270)
         self.sheet_image = compose_sheet(
             layout_photo,

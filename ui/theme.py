@@ -44,6 +44,8 @@ CONTROL_ICON_PATHS = {
     "spin_up": _ICON_DIR / "spin-up.svg",
     "spin_down": _ICON_DIR / "spin-down.svg",
     "checkmark": _ICON_DIR / "checkmark.svg",
+    "rotate_left": _ICON_DIR / "rotate-left.svg",
+    "rotate_right": _ICON_DIR / "rotate-right.svg",
 }
 
 
@@ -210,6 +212,74 @@ QPushButton[variant="quiet"]:hover {{
     color: {COLORS["text"]};
     background: {COLORS["control"]};
     border-color: {COLORS["border"]};
+}}
+
+QWidget[segmentedControl="true"] {{
+    background: {COLORS["control"]};
+    border: 1px solid {COLORS["border"]};
+    border-radius: 8px;
+}}
+
+QPushButton[segmentItem="true"],
+QRadioButton[segmentItem="true"] {{
+    min-height: 30px;
+    padding: 0 9px;
+    color: {COLORS["muted_text"]};
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+}}
+
+QPushButton[segmentItem="true"]:hover,
+QRadioButton[segmentItem="true"]:hover {{
+    color: {COLORS["text"]};
+    background: {COLORS["control_hover"]};
+}}
+
+QPushButton[segmentItem="true"]:pressed {{
+    color: {COLORS["text"]};
+    background: rgba(232, 176, 75, 31);
+}}
+
+QRadioButton[segmentItem="true"]:checked {{
+    color: {COLORS["on_primary"]};
+    background: {COLORS["primary"]};
+    font-weight: 600;
+}}
+
+QPushButton[segmentItem="true"]:focus,
+QRadioButton[segmentItem="true"]:focus {{
+    color: {COLORS["text"]};
+    border: 1px solid {COLORS["focus"]};
+}}
+
+QRadioButton[segmentItem="true"]:checked:focus {{
+    color: {COLORS["on_primary"]};
+    border: 1px solid {COLORS["on_primary"]};
+}}
+
+QPushButton[segmentItem="true"]:disabled,
+QRadioButton[segmentItem="true"]:disabled {{
+    color: #666865;
+    background: transparent;
+    border-color: transparent;
+}}
+
+QRadioButton[segmentItem="true"]::indicator {{
+    width: 0;
+    height: 0;
+    margin: 0;
+}}
+
+QFrame[segmentDivider="true"] {{
+    min-width: 1px;
+    max-width: 1px;
+    margin: 7px 0;
+    color: {COLORS["border"]};
+    background: {COLORS["border"]};
+    border: 0;
 }}
 
 QPushButton:disabled {{

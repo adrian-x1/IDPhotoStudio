@@ -79,6 +79,11 @@ class ThemeTests(unittest.TestCase):
             "QDoubleSpinBox::down-arrow",
             "spin-down.svg",
             'QRadioButton[segment="true"]',
+            'QWidget[segmentedControl="true"]',
+            'QPushButton[segmentItem="true"]',
+            'QRadioButton[segmentItem="true"]',
+            'QRadioButton[segmentItem="true"]:checked:focus',
+            'QFrame[segmentDivider="true"]',
             "QCheckBox::indicator:checked",
             "checkmark.svg",
         )
@@ -110,7 +115,7 @@ class ThemeTests(unittest.TestCase):
                 spec.loader.exec_module(bundled_theme)
 
             self.assertEqual(bundled_theme._ICON_DIR, bundled_icon_dir)
-            self.assertEqual(len(bundled_theme.CONTROL_ICON_PATHS), 4)
+            self.assertEqual(len(bundled_theme.CONTROL_ICON_PATHS), 6)
             for path in bundled_theme.CONTROL_ICON_PATHS.values():
                 with self.subTest(icon=path.name):
                     self.assertTrue(path.is_file())

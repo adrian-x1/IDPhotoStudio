@@ -164,27 +164,57 @@ class MainWindowTests(unittest.TestCase):
                 self.assertIsInstance(radio, QRadioButton)
                 self.assertTrue(radio.property("segment"))
 
-    def test_rotation_controls_are_accessible_independent_buttons(self) -> None:
-        photo_button = getattr(self.window, "rotate_photo_button", None)
-        frame_button = getattr(self.window, "rotate_crop_frame_button", None)
+    def test_rotation_controls_are_accessible_segmented_pairs(self) -> None:
+        left_button = getattr(self.window, "rotate_photo_left_button", None)
+        right_button = getattr(self.window, "rotate_photo_right_button", None)
+        portrait_radio = getattr(self.window, "portrait_crop_radio", None)
+        landscape_radio = getattr(self.window, "landscape_crop_radio", None)
 
-        self.assertIsNotNone(photo_button)
-        self.assertIsNotNone(frame_button)
-        self.assertEqual(photo_button.text(), "旋转照片")
-        self.assertEqual(frame_button.text(), "旋转裁剪框")
-        self.assertEqual(
-            photo_button.accessibleName(),
-            "顺时针旋转照片 90 度",
+        self.assertIsNotNone(left_button)
+        self.assertIsNotNone(right_button)
+        self.assertIsInstance(self.window.crop_orientation_group, QButtonGroup)
+        self.assertTrue(self.window.crop_orientation_group.exclusive())
+        self.assertIsInstance(portrait_radio, QRadioButton)
+        self.assertIsInstance(landscape_radio, QRadioButton)
+        self.assertEqual(left_button.text(), "")
+        self.assertEqual(right_button.text(), "")
+        self.assertFalse(left_button.icon().isNull())
+        self.assertFalse(right_button.icon().isNull())
+        self.assertEqual(portrait_radio.text(), "竖版")
+        self.assertEqual(landscape_radio.text(), "横版")
+        self.assertEqual(left_button.accessibleName(), "向左旋转照片 90 度")
+        self.assertEqual(right_button.accessibleName(), "向右旋转照片 90 度")
+        self.assertEqual(portrait_radio.accessibleName(), "竖版裁剪框")
+        self.assertEqual(landscape_radio.accessibleName(), "横版裁剪框")
+        self.assertIn("裁剪框方向不变", left_button.toolTip())
+        self.assertIn("裁剪框方向不变", right_button.toolTip())
+        self.assertIn("照片方向不变", portrait_radio.toolTip())
+        self.assertIn("不改变 6 寸相纸排版", landscape_radio.toolTip())
+        self.assertTrue(
+            self.window.photo_rotation_control.property("segmentedControl")
         )
-        self.assertEqual(
-            frame_button.accessibleName(),
-            "顺时针旋转裁剪框 90 度",
+        self.assertTrue(
+            self.window.crop_orientation_control.property("segmentedControl")
         )
-        self.assertIn("裁剪框方向不变", photo_button.toolTip())
-        self.assertIn("照片方向不变", frame_button.toolTip())
-        self.assertIn("不改变 6 寸相纸排版", frame_button.toolTip())
-        self.assertFalse(photo_button.isEnabled())
-        self.assertFalse(frame_button.isEnabled())
+        self.assertTrue(
+            self.window.photo_rotation_divider.property("segmentDivider")
+        )
+        self.assertTrue(
+            self.window.crop_orientation_divider.property("segmentDivider")
+        )
+        self.assertEqual(self.window.photo_rotation_control.layout().spacing(), 0)
+        self.assertEqual(self.window.crop_orientation_control.layout().spacing(), 0)
+        self.assertTrue(portrait_radio.isChecked())
+        self.assertFalse(landscape_radio.isChecked())
+        for control in (
+            left_button,
+            right_button,
+            portrait_radio,
+            landscape_radio,
+        ):
+            with self.subTest(control=control.accessibleName()):
+                self.assertTrue(control.property("segmentItem"))
+                self.assertFalse(control.isEnabled())
 
     def test_colored_background_segments_show_only_centered_accessible_dots(self) -> None:
         colored_radios = (
@@ -354,11 +384,17 @@ class MainWindowTests(unittest.TestCase):
             12 / 16,
         )
 
-    def test_photo_rotation_repeats_without_changing_crop_ratio_or_layout(
+    def test_photo_rotation_buttons_turn_both_directions_without_changing_crop(
         self,
     ) -> None:
-        self.assertTrue(hasattr(self.window, "rotate_photo_button"))
-        self.assertTrue(self.load_portrait())
+        directional_path = Path(self.temp_dir.name) / "directional.png"
+        directional = Image.new("RGB", (1000, 1200), (80, 100, 120))
+        directional.paste((220, 40, 40), (0, 0, 500, 600))
+        directional.paste((40, 180, 80), (500, 0, 1000, 600))
+        directional.paste((40, 80, 220), (0, 600, 500, 1200))
+        directional.save(directional_path)
+        with patch("ui.main_window.detect_face", return_value=self.detection):
+            self.assertTrue(self.window.load_image(directional_path))
         original_source = self.window.source_image.copy()
         original_ratio = (
             self.window.crop_view.crop_box.width
@@ -366,19 +402,37 @@ class MainWindowTests(unittest.TestCase):
         )
         portrait_layout = self.window.sheet_layout
         portrait_sheet_size = self.window.sheet_image.size
-        expected_sources = (
-            original_source.transpose(Image.Transpose.ROTATE_270),
-            original_source.transpose(Image.Transpose.ROTATE_180),
-            original_source.transpose(Image.Transpose.ROTATE_90),
-            original_source,
+        actions_and_sources = (
+            (
+                self.window.rotate_photo_left_button,
+                original_source.transpose(Image.Transpose.ROTATE_90),
+                3,
+            ),
+            (self.window.rotate_photo_right_button, original_source, 0),
+            (
+                self.window.rotate_photo_right_button,
+                original_source.transpose(Image.Transpose.ROTATE_270),
+                1,
+            ),
+            (
+                self.window.rotate_photo_right_button,
+                original_source.transpose(Image.Transpose.ROTATE_180),
+                2,
+            ),
+            (
+                self.window.rotate_photo_right_button,
+                original_source.transpose(Image.Transpose.ROTATE_90),
+                3,
+            ),
+            (self.window.rotate_photo_right_button, original_source, 0),
         )
 
         with patch(
             "ui.main_window.detect_face",
             return_value=self.detection,
         ) as detect:
-            for expected_source in expected_sources:
-                self.window.rotate_photo_button.click()
+            for button, expected_source, expected_quarters in actions_and_sources:
+                button.click()
                 self.app.processEvents()
 
                 box = self.window.crop_view.crop_box
@@ -397,24 +451,36 @@ class MainWindowTests(unittest.TestCase):
                 self.assertAlmostEqual(box.width / box.height, original_ratio)
                 self.assertEqual(self.window.sheet_layout, portrait_layout)
                 self.assertEqual(self.window.sheet_image.size, portrait_sheet_size)
+                self.assertEqual(
+                    self.window._photo_rotation_quarters,
+                    expected_quarters,
+                )
 
-        self.assertEqual(detect.call_count, 4)
+        self.assertEqual(detect.call_count, 6)
         self.assertEqual(
             [call.args[0].shape[:2] for call in detect.call_args_list],
-            [(1000, 1200), (1200, 1000), (1000, 1200), (1200, 1000)],
+            [
+                (1000, 1200),
+                (1200, 1000),
+                (1000, 1200),
+                (1200, 1000),
+                (1000, 1200),
+                (1200, 1000),
+            ],
         )
 
-    def test_crop_frame_rotation_swaps_ratio_without_rotating_photo(self) -> None:
-        self.assertTrue(hasattr(self.window, "rotate_crop_frame_button"))
+    def test_crop_orientation_radios_switch_ratio_without_rotating_photo(self) -> None:
         self.assertTrue(self.load_portrait())
         source_bytes = self.window.source_image.tobytes()
         portrait_layout = self.window.sheet_layout
         portrait_sheet_size = self.window.sheet_image.size
 
         with patch("ui.main_window.detect_face") as detect:
-            self.window.rotate_crop_frame_button.click()
+            self.window.landscape_crop_radio.click()
             self.app.processEvents()
             self.assertEqual(self.window.source_image.tobytes(), source_bytes)
+            self.assertFalse(self.window.portrait_crop_radio.isChecked())
+            self.assertTrue(self.window.landscape_crop_radio.isChecked())
             self.assertAlmostEqual(
                 self.window.crop_view.crop_box.width
                 / self.window.crop_view.crop_box.height,
@@ -424,11 +490,13 @@ class MainWindowTests(unittest.TestCase):
                 self.window.finished_photo.width,
                 self.window.finished_photo.height,
             )
-            self.window.rotate_crop_frame_button.click()
+            self.window.portrait_crop_radio.click()
             self.app.processEvents()
 
         detect.assert_not_called()
         self.assertEqual(self.window.source_image.tobytes(), source_bytes)
+        self.assertTrue(self.window.portrait_crop_radio.isChecked())
+        self.assertFalse(self.window.landscape_crop_radio.isChecked())
         self.assertAlmostEqual(
             self.window.crop_view.crop_box.width
             / self.window.crop_view.crop_box.height,
@@ -445,8 +513,8 @@ class MainWindowTests(unittest.TestCase):
 
         with patch("ui.main_window.detect_face", return_value=self.detection):
             for _ in range(3):
-                self.window.rotate_photo_button.click()
-        self.window.rotate_crop_frame_button.click()
+                self.window.rotate_photo_right_button.click()
+        self.window.landscape_crop_radio.click()
         self.app.processEvents()
 
         self.assertEqual(
@@ -473,12 +541,14 @@ class MainWindowTests(unittest.TestCase):
     def test_rotation_persists_across_specs_and_resets_for_a_new_image(self) -> None:
         self.assertTrue(self.load_portrait())
         with patch("ui.main_window.detect_face", return_value=self.detection):
-            self.window.rotate_photo_button.click()
-        self.window.rotate_crop_frame_button.click()
+            self.window.rotate_photo_right_button.click()
+        self.window.landscape_crop_radio.click()
 
         self.window.spec_combo.setCurrentText("英语四六级")
         self.app.processEvents()
         self.assertEqual(self.window.source_image.size, (1200, 1000))
+        self.assertEqual(self.window._photo_rotation_quarters, 1)
+        self.assertTrue(self.window.landscape_crop_radio.isChecked())
         self.assertAlmostEqual(
             self.window.crop_view.crop_box.width
             / self.window.crop_view.crop_box.height,
@@ -487,6 +557,9 @@ class MainWindowTests(unittest.TestCase):
 
         self.assertTrue(self.load_portrait())
         self.assertEqual(self.window.source_image.size, (1000, 1200))
+        self.assertEqual(self.window._photo_rotation_quarters, 0)
+        self.assertTrue(self.window.portrait_crop_radio.isChecked())
+        self.assertFalse(self.window.landscape_crop_radio.isChecked())
         self.assertAlmostEqual(
             self.window.crop_view.crop_box.width
             / self.window.crop_view.crop_box.height,
@@ -496,8 +569,8 @@ class MainWindowTests(unittest.TestCase):
     def test_missing_face_uses_centered_landscape_manual_crop(self) -> None:
         with patch("ui.main_window.detect_face", return_value=None):
             self.assertFalse(self.window.load_image(self.image_path))
-            self.window.rotate_photo_button.click()
-        self.window.rotate_crop_frame_button.click()
+            self.window.rotate_photo_right_button.click()
+        self.window.landscape_crop_radio.click()
         self.app.processEvents()
 
         box = self.window.crop_view.crop_box
@@ -510,8 +583,8 @@ class MainWindowTests(unittest.TestCase):
     def test_reset_crop_keeps_current_rotation(self) -> None:
         self.assertTrue(self.load_portrait())
         with patch("ui.main_window.detect_face", return_value=self.detection):
-            self.window.rotate_photo_button.click()
-        self.window.rotate_crop_frame_button.click()
+            self.window.rotate_photo_right_button.click()
+        self.window.landscape_crop_radio.click()
         automatic_box = self.window.crop_view.crop_box
         moved_box = CropBox(
             automatic_box.left,
@@ -626,8 +699,10 @@ class MainWindowTests(unittest.TestCase):
 
         self.assertFalse(self.window.load_image(bad_path))
         self.assertIn("无法读取照片", self.window.status_label.text())
-        self.assertFalse(self.window.rotate_photo_button.isEnabled())
-        self.assertFalse(self.window.rotate_crop_frame_button.isEnabled())
+        self.assertFalse(self.window.rotate_photo_left_button.isEnabled())
+        self.assertFalse(self.window.rotate_photo_right_button.isEnabled())
+        self.assertFalse(self.window.portrait_crop_radio.isEnabled())
+        self.assertFalse(self.window.landscape_crop_radio.isEnabled())
 
         with patch("ui.main_window.detect_face", return_value=None):
             self.assertFalse(self.window.load_image(self.image_path))
@@ -639,8 +714,10 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(self.window.sheet_preview.pixmap().isNull())
         self.assertEqual(self.window.count_label.text(), "共 12 张")
         self.assertFalse(self.window.reset_crop_button.isEnabled())
-        self.assertTrue(self.window.rotate_photo_button.isEnabled())
-        self.assertTrue(self.window.rotate_crop_frame_button.isEnabled())
+        self.assertTrue(self.window.rotate_photo_left_button.isEnabled())
+        self.assertTrue(self.window.rotate_photo_right_button.isEnabled())
+        self.assertTrue(self.window.portrait_crop_radio.isEnabled())
+        self.assertTrue(self.window.landscape_crop_radio.isEnabled())
 
     def test_photo_rotation_detection_failure_uses_recoverable_error_state(
         self,
@@ -651,7 +728,7 @@ class MainWindowTests(unittest.TestCase):
             "ui.main_window.detect_face",
             side_effect=RuntimeError("model unavailable"),
         ):
-            self.window.rotate_photo_button.click()
+            self.window.rotate_photo_right_button.click()
         self.app.processEvents()
 
         self.assertEqual(self.window.source_image.size, (1200, 1000))
@@ -665,8 +742,10 @@ class MainWindowTests(unittest.TestCase):
         self.assertIn("人脸检测失败", self.window.status_label.text())
         self.assertIsNone(self.window.crop_view.crop_box)
         self.assertIsNone(self.window.sheet_image)
-        self.assertTrue(self.window.rotate_photo_button.isEnabled())
-        self.assertTrue(self.window.rotate_crop_frame_button.isEnabled())
+        self.assertTrue(self.window.rotate_photo_left_button.isEnabled())
+        self.assertTrue(self.window.rotate_photo_right_button.isEnabled())
+        self.assertTrue(self.window.portrait_crop_radio.isEnabled())
+        self.assertTrue(self.window.landscape_crop_radio.isEnabled())
 
     def test_multiple_faces_show_non_blocking_largest_face_notice(self) -> None:
         detection = FaceDetectionResult(self.face, 2)
@@ -840,7 +919,7 @@ class MainWindowTests(unittest.TestCase):
             self.window.blue_background_radio.setChecked(True)
             self.wait_until(first_started.is_set)
 
-            if button_name == "rotate_photo_button":
+            if button_name.startswith("rotate_photo_"):
                 with patch(
                     "ui.main_window.detect_face",
                     return_value=self.detection,
@@ -874,15 +953,21 @@ class MainWindowTests(unittest.TestCase):
             )
         self.assertEqual(self.window.finished_photo.getpixel((0, 0)), (67, 142, 219))
 
-    def test_photo_rotation_discards_stale_matting_result(self) -> None:
+    def test_left_photo_rotation_discards_stale_matting_result(self) -> None:
         self._assert_rotation_discards_stale_matting_result(
-            "rotate_photo_button",
+            "rotate_photo_left_button",
             expect_landscape=False,
         )
 
-    def test_crop_frame_rotation_discards_stale_matting_result(self) -> None:
+    def test_right_photo_rotation_discards_stale_matting_result(self) -> None:
         self._assert_rotation_discards_stale_matting_result(
-            "rotate_crop_frame_button",
+            "rotate_photo_right_button",
+            expect_landscape=False,
+        )
+
+    def test_crop_orientation_change_discards_stale_matting_result(self) -> None:
+        self._assert_rotation_discards_stale_matting_result(
+            "landscape_crop_radio",
             expect_landscape=True,
         )
 
