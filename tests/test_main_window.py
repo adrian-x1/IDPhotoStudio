@@ -757,6 +757,101 @@ class MainWindowTests(unittest.TestCase):
                 Image.Resampling.LANCZOS,
             )
 
+    def test_spec_changes_update_immediately_with_fast_sheet_previews(self) -> None:
+        self.assertTrue(self.load_portrait())
+        initial_preview_key = self.window.sheet_preview.pixmap().cacheKey()
+
+        with patch("ui.main_window.compose_sheet", wraps=compose_sheet) as compose:
+            self.window.spec_combo.setCurrentText("三寸")
+            self.assertEqual(self.window.count_label.text(), "共 2 张")
+            self.assertNotEqual(
+                self.window.sheet_preview.pixmap().cacheKey(),
+                initial_preview_key,
+            )
+            self.assertEqual(
+                compose.call_args.kwargs["resample"],
+                Image.Resampling.BOX,
+            )
+
+            self.window.spec_combo.setCurrentText("英语四六级")
+            self.assertEqual(self.window.count_label.text(), "共 56 张")
+            self.assertEqual(
+                compose.call_args.kwargs["resample"],
+                Image.Resampling.BOX,
+            )
+
+    def test_rapid_spec_changes_refine_only_the_final_preview_once(self) -> None:
+        self.assertTrue(self.load_portrait())
+
+        with patch("ui.main_window.compose_sheet", wraps=compose_sheet) as compose:
+            for spec_name in ("三寸", "二寸", "英语四六级"):
+                self.window.spec_combo.setCurrentText(spec_name)
+
+            self.assertEqual(compose.call_count, 3)
+            self.assertTrue(
+                all(
+                    item.kwargs["resample"] == Image.Resampling.BOX
+                    for item in compose.call_args_list
+                )
+            )
+            QTest.qWait(300)
+            self.app.processEvents()
+
+        self.assertEqual(compose.call_count, 4)
+        self.assertEqual(
+            compose.call_args_list[-1].kwargs["resample"],
+            Image.Resampling.LANCZOS,
+        )
+        self.assertEqual(self.window.spec_combo.currentText(), "英语四六级")
+        self.assertEqual(self.window.count_label.text(), "共 56 张")
+
+    def test_sheet_export_and_print_force_full_quality_during_fast_preview(self) -> None:
+        self.assertTrue(self.load_portrait())
+        export_path = str(Path(self.temp_dir.name) / "sheet.jpg")
+
+        with (
+            patch("ui.main_window.compose_sheet", wraps=compose_sheet) as compose,
+            patch(
+                "ui.main_window.QFileDialog.getSaveFileName",
+                return_value=(export_path, ""),
+            ),
+            patch("ui.main_window.export_jpeg") as export_jpeg,
+        ):
+            self.window.spec_combo.setCurrentText("三寸")
+            self.assertEqual(
+                compose.call_args.kwargs["resample"],
+                Image.Resampling.BOX,
+            )
+            self.window.export_sheet_jpeg_action.trigger()
+            self.assertEqual(
+                compose.call_args.kwargs["resample"],
+                Image.Resampling.LANCZOS,
+            )
+            export_jpeg.assert_called_once_with(
+                self.window.sheet_image,
+                export_path,
+            )
+
+            self.window.spec_combo.setCurrentText("英语四六级")
+            self.assertEqual(
+                compose.call_args.kwargs["resample"],
+                Image.Resampling.BOX,
+            )
+            with patch(
+                "ui.main_window.print_sheet",
+                return_value=PrintOutcome.CANCELLED,
+            ) as print_sheet:
+                self.window.print_button.click()
+            self.assertEqual(
+                compose.call_args.kwargs["resample"],
+                Image.Resampling.LANCZOS,
+            )
+            print_sheet.assert_called_once_with(
+                self.window.sheet_image,
+                self.window.sheet_layout,
+                self.window,
+            )
+
     def test_colored_background_only_restarts_matting_after_crop_release(self) -> None:
         self.assertTrue(self.load_portrait())
 

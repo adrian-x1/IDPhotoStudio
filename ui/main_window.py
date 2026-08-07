@@ -9,7 +9,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageOps
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QMimeData, QSize, QThreadPool, Qt
+from PySide6.QtCore import QMimeData, QSize, QThreadPool, QTimer, Qt
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -204,6 +204,11 @@ class MainWindow(QMainWindow):
         self._pending_matting: tuple[int, Image.Image] | None = None
         self._thread_pool = QThreadPool(self)
         self._thread_pool.setMaxThreadCount(1)
+        self._sheet_preview_is_fast = False
+        self._layout_refine_timer = QTimer(self)
+        self._layout_refine_timer.setSingleShot(True)
+        self._layout_refine_timer.setInterval(250)
+        self._layout_refine_timer.timeout.connect(self._refine_layout_preview)
 
         application = QApplication.instance()
         if isinstance(application, QApplication):
@@ -785,6 +790,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self._ensure_full_quality_layout()
         try:
             export_jpeg(self.sheet_image, path)
         except (IOError, PermissionError) as error:
@@ -803,6 +809,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self._ensure_full_quality_layout()
         try:
             export_png(self.sheet_image, path)
         except (IOError, PermissionError) as error:
@@ -821,6 +828,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self._ensure_full_quality_layout()
         try:
             export_pdf(self.sheet_image, path)
         except (IOError, PermissionError) as error:
@@ -831,6 +839,7 @@ class MainWindow(QMainWindow):
     def _print_current_sheet(self) -> None:
         if self.sheet_image is None or self.sheet_layout is None:
             return
+        self._ensure_full_quality_layout()
         outcome = print_sheet(self.sheet_image, self.sheet_layout, self)
         if outcome is PrintOutcome.NO_PRINTER:
             self.status_label.setText("没有可用打印机")
@@ -937,7 +946,8 @@ class MainWindow(QMainWindow):
 
     def _on_spec_changed(self) -> None:
         if self.source_image is not None:
-            self._refresh_crop()
+            self._refresh_crop(layout_resample=Image.Resampling.BOX)
+            self._layout_refine_timer.start()
 
     def _rotate_photo_left(self) -> None:
         self._rotate_photo(-1)
@@ -979,7 +989,11 @@ class MainWindow(QMainWindow):
         self._crop_orientation_landscape = landscape
         self._refresh_crop()
 
-    def _refresh_crop(self) -> None:
+    def _refresh_crop(
+        self,
+        *,
+        layout_resample: Image.Resampling = Image.Resampling.LANCZOS,
+    ) -> None:
         if self.source_image is None:
             return
         self._invalidate_crop_revision()
@@ -1026,7 +1040,7 @@ class MainWindow(QMainWindow):
         )
         self._set_cropped_original(box)
         self._update_crop_warning(box, target)
-        self._apply_background_selection()
+        self._apply_background_selection(layout_resample=layout_resample)
 
     def _centered_manual_box(self, aspect_ratio: float) -> CropBox:
         assert self.source_image is not None
@@ -1142,7 +1156,11 @@ class MainWindow(QMainWindow):
             self.warning_label.clear()
             self.warning_label.setVisible(False)
 
-    def _apply_background_selection(self) -> None:
+    def _apply_background_selection(
+        self,
+        *,
+        layout_resample: Image.Resampling = Image.Resampling.LANCZOS,
+    ) -> None:
         if self.cropped_original is None:
             return
         background = self._selected_background()
@@ -1151,7 +1169,7 @@ class MainWindow(QMainWindow):
             self._pending_matting = None
             self.finished_photo = self.cropped_original
             self.crop_preview.set_image(self.finished_photo)
-            self._refresh_layout()
+            self._refresh_layout(resample=layout_resample)
             self._set_matting_progress(False)
             self._set_status("保持原底，未执行抠图")
             return
@@ -1165,14 +1183,14 @@ class MainWindow(QMainWindow):
                 background,
             )
             self.crop_preview.set_image(self.finished_photo)
-            self._refresh_layout()
+            self._refresh_layout(resample=layout_resample)
             self._set_matting_progress(False)
             self._set_status("换底完成")
             return
 
         self.finished_photo = self.cropped_original
         self.crop_preview.set_image(self.finished_photo)
-        self._refresh_layout()
+        self._refresh_layout(resample=layout_resample)
         self._request_matting()
 
     def _request_matting(self) -> None:
@@ -1239,6 +1257,7 @@ class MainWindow(QMainWindow):
             self._set_matting_progress(False)
 
     def _invalidate_crop_revision(self) -> None:
+        self._layout_refine_timer.stop()
         self._crop_revision += 1
         self._foreground_cache = None
         self._pending_matting = None
@@ -1252,6 +1271,24 @@ class MainWindow(QMainWindow):
 
     def _set_matting_progress(self, active: bool) -> None:
         self.progress_bar.setVisible(active)
+
+    def _refine_layout_preview(self) -> None:
+        if not self._sheet_preview_is_fast:
+            return
+        if (
+            self._selected_background() != ORIGINAL_BACKGROUND
+            and not (
+                self._foreground_cache is not None
+                and self._foreground_cache[0] == self._crop_revision
+            )
+        ):
+            return
+        self._refresh_layout()
+
+    def _ensure_full_quality_layout(self) -> None:
+        self._layout_refine_timer.stop()
+        if self._sheet_preview_is_fast:
+            self._refresh_layout()
 
     def _refresh_layout(
         self,
@@ -1273,6 +1310,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             self.sheet_image = None
             self.sheet_layout = None
+            self._sheet_preview_is_fast = False
             self.sheet_preview.clear_image("当前参数无法排入相纸")
             self._set_count(0)
             self._refresh_output_actions_enabled()
@@ -1292,6 +1330,7 @@ class MainWindow(QMainWindow):
             resample=resample,
         )
         self.sheet_preview.set_image(self.sheet_image)
+        self._sheet_preview_is_fast = resample != Image.Resampling.LANCZOS
         self._set_count(layout.count)
         self._refresh_output_actions_enabled()
 
@@ -1320,6 +1359,7 @@ class MainWindow(QMainWindow):
         self.finished_photo = None
         self.sheet_image = None
         self.sheet_layout = None
+        self._sheet_preview_is_fast = False
         self.crop_preview.clear_image("等待自动裁剪")
         self.sheet_preview.clear_image("等待生成相纸排版")
         self._set_count(None)
