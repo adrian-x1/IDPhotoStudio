@@ -4,10 +4,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from PIL import Image
+from PIL import Image, JpegImagePlugin
 
-from core.export import export_pdf, export_png
+from core.export import export_jpeg, export_pdf, export_png, render_photo
 from core.layout import compose_sheet, solve_layout
+from core.units import mm_to_px
 
 
 MEDIA_BOX_PATTERN = re.compile(
@@ -37,6 +38,35 @@ def _physical_pixel_density(path: Path) -> tuple[int, int, int]:
 
 
 class ExportTests(unittest.TestCase):
+    def test_export_jpeg_converts_rgba_to_444_rgb_at_300_dpi(self) -> None:
+        image = Image.new("RGBA", (295, 413), (40, 80, 120, 128))
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "一寸.jpg"
+            export_jpeg(image, path)
+
+            with Image.open(path) as exported:
+                self.assertEqual(exported.format, "JPEG")
+                self.assertEqual(exported.mode, "RGB")
+                self.assertEqual(exported.info["dpi"], (300, 300))
+                self.assertEqual(JpegImagePlugin.get_sampling(exported), 0)
+
+    def test_render_photo_returns_exact_one_and_two_inch_pixels(self) -> None:
+        photo = Image.new("RGB", (100, 100), "white")
+
+        self.assertEqual(render_photo(photo, 25, 35).size, (295, 413))
+        self.assertEqual(render_photo(photo, 35, 49).size, (413, 579))
+
+    def test_render_photo_dimensions_match_shared_mm_conversion(self) -> None:
+        photo = Image.new("RGB", (100, 100), "white")
+
+        for width_mm, height_mm in ((25, 35), (35, 49), (55, 84)):
+            with self.subTest(size=(width_mm, height_mm)):
+                self.assertEqual(
+                    render_photo(photo, width_mm, height_mm).size,
+                    (mm_to_px(width_mm), mm_to_px(height_mm)),
+                )
+
     def test_export_png_preserves_pixels_and_writes_300_dpi_phys(self) -> None:
         image = Image.new("RGB", (1205, 1795), "white")
 
