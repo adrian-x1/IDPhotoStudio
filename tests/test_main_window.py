@@ -206,6 +206,18 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.crop_orientation_control.layout().spacing(), 0)
         self.assertTrue(portrait_radio.isChecked())
         self.assertFalse(landscape_radio.isChecked())
+        for radio in (portrait_radio, landscape_radio):
+            with self.subTest(label=radio.text()):
+                self.assertGreaterEqual(
+                    radio.width(),
+                    radio.sizeHint().width(),
+                    "横竖版按钮必须完整容纳文字和内边距",
+                )
+        self.assertGreaterEqual(
+            self.window.reset_crop_button.width(),
+            self.window.reset_crop_button.sizeHint().width(),
+            "重置按钮必须完整容纳文字和内边距",
+        )
         for control in (
             left_button,
             right_button,

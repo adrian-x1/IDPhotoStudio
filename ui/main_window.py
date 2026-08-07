@@ -381,7 +381,7 @@ class MainWindow(QMainWindow):
         self.reset_crop_button.setProperty("variant", "quiet")
         self.reset_crop_button.setAccessibleName("重置裁剪框为自动位置")
         self.reset_crop_button.setToolTip("恢复自动裁剪位置")
-        self.reset_crop_button.setFixedWidth(40)
+        self.reset_crop_button.setFixedWidth(44)
         self.reset_crop_button.setEnabled(False)
 
         self.photo_rotation_control = QFrame()
@@ -445,7 +445,7 @@ class MainWindow(QMainWindow):
         self.crop_orientation_control = QFrame()
         self.crop_orientation_control.setProperty("segmentedControl", True)
         self.crop_orientation_control.setAccessibleName("裁剪框方向")
-        self.crop_orientation_control.setFixedWidth(86)
+        self.crop_orientation_control.setFixedWidth(106)
         crop_orientation_layout = QHBoxLayout(self.crop_orientation_control)
         crop_orientation_layout.setContentsMargins(1, 1, 1, 1)
         crop_orientation_layout.setSpacing(0)
