@@ -2,6 +2,42 @@
 
 这份手册只服务于当前 `idphoto` 项目。目标是把以后每次修改后的操作固定成同一条流水线，不再临时询问每一步。
 
+## 首选快速流程：一层式 ZIP + 双击脚本
+
+拿到 `idphoto-windows-ready-<日期>.zip` 后，优先使用这一流程，不需要整理文件夹，也不需要在 CMD 中逐条输入命令：
+
+1. 把 ZIP 完整解压到 Windows 本地磁盘的一个新文件夹；不要在压缩包预览窗口里直接运行。
+2. 打开解压后的顶层文件夹，确认能同时看到：
+
+   ```text
+   ONE-CLICK-WINDOWS.cmd
+   windows-wheels\
+   main.py
+   build.spec
+   requirements.txt
+   requirements-build.txt
+   assets\models\isnet-general-use.onnx
+   assets\models\face_landmarker.task
+   assets\models\blaze_face_short_range.tflite
+   ```
+
+3. 双击 `ONE-CLICK-WINDOWS.cmd`，等待它依次完成 8 个阶段：检查文件、检查 Python、创建 `.venv`、离线安装、依赖检查、测试、打包、启动软件。
+4. 成功后软件会自动打开，成品位于 `dist\idphoto\idphoto.exe`。这是 onedir 程序，使用或交付时必须保留整个 `dist\idphoto` 文件夹。
+5. 如果窗口停在 `FAILED`，不要反复重试或联网安装；把同层的 `windows-one-click.log` 发给 AI。脚本会在失败时暂停，日志中保存完整命令输出。
+
+脚本要求系统已安装 **Python 3.13 x64**。它强制使用同层 `windows-wheels`，带 `--no-index` 离线安装，不会从网络补依赖；每次只清理当前解压目录里的 `build` 和 `dist`。
+
+软件自动打开后仍要在 Windows 真机完成以下验收，Mac 测试和 ZIP 校验不能代替这些结果：
+
+- 用真实手机大图首次切换物理尺寸不同的规格，右侧排版和张数应一次点击立即变化；
+- 快速反复切换后，最终结果必须对应最后选择的规格；
+- 验证旋转、完整重置、原底、彩色底、导出和打印；
+- 断网后重新运行 EXE，验证人脸模型和换底模型均可用。
+
+## 手动排错流程
+
+下面保留分步命令，供一键脚本失败时定位问题，或以后只传小型源码包进行增量更新。首次使用新的一层式 ZIP 时不用先执行这些步骤。
+
 ## 先记住四件事
 
 1. **代码在 Mac 上修改和提交，Windows 只负责真机测试、打包和打印验收。** PyInstaller 不能在 Mac 上生成可用的 Windows 程序。
