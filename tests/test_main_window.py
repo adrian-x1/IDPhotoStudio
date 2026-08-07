@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -16,10 +16,14 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QFrame,
     QGraphicsDropShadowEffect,
+    QLabel,
+    QMenu,
     QRadioButton,
     QStyle,
     QStyleOptionButton,
+    QToolButton,
 )
 
 from core.crop import (
@@ -31,7 +35,14 @@ from core.crop import (
 )
 from core.detect import FaceDetectionResult
 from core.layout import compose_sheet
-from ui.main_window import IMAGE_FILE_FILTER, SUPPORTED_IMAGE_SUFFIXES, MainWindow
+from ui.main_window import (
+    IMAGE_FILE_FILTER,
+    JPEG_FILE_FILTER,
+    PDF_FILE_FILTER,
+    PNG_FILE_FILTER,
+    SUPPORTED_IMAGE_SUFFIXES,
+    MainWindow,
+)
 from ui.printing import PrintOutcome
 
 
@@ -1054,96 +1065,237 @@ class MainWindowTests(unittest.TestCase):
 
         open_dialog.assert_called_once()
 
-    def test_header_contains_stage_three_output_actions(self) -> None:
+    def test_header_contains_restructured_export_menu_actions(self) -> None:
         header = getattr(self.window, "header_panel", None)
-        output_container = getattr(self.window, "output_actions_container", None)
-        output_layout = getattr(self.window, "output_actions_layout", None)
-        separator = getattr(self.window, "output_actions_separator", None)
+        separator = getattr(self.window, "header_separator", None)
         self.assertIsNotNone(header)
-        self.assertIsNotNone(output_container)
-        self.assertIsNotNone(output_layout)
         self.assertIsNotNone(separator)
         self.assertEqual(header.height(), 56)
-        self.assertTrue(output_container.isVisible())
-        self.assertGreaterEqual(output_container.width(), 240)
-        self.assertEqual(output_layout.count(), 3)
+        self.assertEqual(header.layout().spacing(), 8)
+        for removed_name in (
+            "output_actions_container",
+            "output_actions_layout",
+            "output_actions_separator",
+        ):
+            self.assertFalse(hasattr(self.window, removed_name))
+        title = header.findChild(QLabel, "appTitle")
+        self.assertIsNotNone(title)
+        self.assertEqual(title.text(), "证件照排版")
+        self.assertIsNone(header.findChild(QLabel, "appSubtitle"))
+
+        header_widgets = [
+            header.layout().itemAt(index).widget()
+            for index in range(header.layout().count())
+            if header.layout().itemAt(index).widget() is not None
+        ]
         self.assertEqual(
-            [output_layout.itemAt(index).widget().text() for index in range(3)],
-            ["导出 PNG", "导出 PDF", "打印"],
+            header_widgets,
+            [
+                title,
+                self.window.import_button,
+                self.window.export_button,
+                separator,
+                self.window.print_button,
+            ],
         )
+        self.assertEqual(self.window.import_button.text(), "导入")
+        self.assertEqual(self.window.export_button.text(), "导出")
+        self.assertEqual(self.window.print_button.text(), "打印")
+        self.assertIsNone(self.window.import_button.property("variant"))
+        self.assertIsNone(self.window.export_button.property("variant"))
+        self.assertEqual(self.window.print_button.property("variant"), "primary")
+        for button in (
+            self.window.import_button,
+            self.window.export_button,
+            self.window.print_button,
+        ):
+            self.assertEqual(button.minimumHeight(), 36)
+        self.assertIsInstance(self.window.export_button, QToolButton)
+        self.assertEqual(
+            self.window.export_button.popupMode(),
+            QToolButton.ToolButtonPopupMode.InstantPopup,
+        )
+        self.assertEqual(
+            self.window.export_button.toolButtonStyle(),
+            Qt.ToolButtonStyle.ToolButtonTextOnly,
+        )
+        self.assertIsInstance(self.window.export_button.menu(), QMenu)
+        self.assertIsInstance(separator, QFrame)
+        self.assertEqual(separator.contentsMargins().left(), 4)
+        self.assertEqual(separator.contentsMargins().right(), 4)
         self.assertTrue(separator.isVisible())
 
-        self.window.resize(1040, 680)
-        self.app.processEvents()
-        self.assertTrue(
-            header.rect().contains(
-                self.window.import_button.mapTo(
-                    header,
-                    self.window.import_button.rect().bottomRight(),
-                )
-            )
+        menu_actions = self.window.export_button.menu().actions()
+        self.assertEqual(
+            [action.text() for action in menu_actions],
+            [
+                "单张证件照",
+                "导出 JPEG",
+                "导出 PNG",
+                "6 寸相纸",
+                "导出 JPEG",
+                "导出 PNG",
+                "导出 PDF",
+            ],
+        )
+        for section in (menu_actions[0], menu_actions[3]):
+            self.assertFalse(section.isEnabled())
+            self.assertFalse(section.isSeparator())
+
+        expected_actions = [
+            self.window.export_photo_jpeg_action,
+            self.window.export_photo_png_action,
+            self.window.export_sheet_jpeg_action,
+            self.window.export_sheet_png_action,
+            self.window.export_sheet_pdf_action,
+        ]
+        triggerable_actions = [
+            action
+            for action in self.window.export_button.menu().actions()
+            if action in expected_actions
+        ]
+        self.assertEqual(triggerable_actions, expected_actions)
+        self.assertEqual(
+            [action.text() for action in triggerable_actions],
+            ["导出 JPEG", "导出 PNG", "导出 JPEG", "导出 PNG", "导出 PDF"],
         )
 
-    def test_output_actions_enable_only_while_a_sheet_exists(self) -> None:
-        buttons = (
-            self.window.export_png_button,
-            self.window.export_pdf_button,
-            self.window.print_button,
+    def test_output_actions_follow_photo_and_sheet_data_independently(self) -> None:
+        photo_actions = (
+            self.window.export_photo_jpeg_action,
+            self.window.export_photo_png_action,
         )
-        self.assertTrue(all(not button.isEnabled() for button in buttons))
+        sheet_actions = (
+            self.window.export_sheet_jpeg_action,
+            self.window.export_sheet_png_action,
+            self.window.export_sheet_pdf_action,
+        )
+        self.assertTrue(all(not action.isEnabled() for action in photo_actions))
+        self.assertTrue(all(not action.isEnabled() for action in sheet_actions))
+        self.assertFalse(self.window.export_button.isEnabled())
+        self.assertFalse(self.window.print_button.isEnabled())
 
         self.assertTrue(self.load_portrait())
-        self.assertTrue(all(button.isEnabled() for button in buttons))
+        self.assertTrue(all(action.isEnabled() for action in photo_actions))
+        self.assertTrue(all(action.isEnabled() for action in sheet_actions))
+        self.assertTrue(self.window.export_button.isEnabled())
+        self.assertTrue(self.window.print_button.isEnabled())
 
         self.window.margin_spin.setMaximum(100)
         self.window.margin_spin.setValue(100)
         self.app.processEvents()
+        self.assertIsNotNone(self.window.finished_photo)
         self.assertIsNone(self.window.sheet_image)
-        self.assertTrue(all(not button.isEnabled() for button in buttons))
+        self.assertTrue(all(action.isEnabled() for action in photo_actions))
+        self.assertTrue(all(not action.isEnabled() for action in sheet_actions))
+        self.assertTrue(self.window.export_button.isEnabled())
+        self.assertFalse(self.window.print_button.isEnabled())
 
-    def test_export_dialogs_use_spec_names_and_cancel_without_exporting(self) -> None:
+    def test_export_actions_use_expected_names_filters_and_image_sources(self) -> None:
         self.assertTrue(self.load_portrait())
-        png_path = str(Path(self.temp_dir.name) / "一寸_4R.png")
-        pdf_path = str(Path(self.temp_dir.name) / "一寸_4R.pdf")
+        paths = [
+            str(Path(self.temp_dir.name) / name)
+            for name in (
+                "一寸.jpg",
+                "一寸.png",
+                "一寸_4R.jpg",
+                "一寸_4R.png",
+                "一寸_4R.pdf",
+            )
+        ]
+        rendered_photo = Image.new("RGB", (295, 413), "white")
+        target = self.window._current_target_size()
+        actions = (
+            self.window.export_photo_jpeg_action,
+            self.window.export_photo_png_action,
+            self.window.export_sheet_jpeg_action,
+            self.window.export_sheet_png_action,
+            self.window.export_sheet_pdf_action,
+        )
 
         with (
             patch(
                 "ui.main_window.QFileDialog.getSaveFileName",
-                side_effect=((png_path, ""), (pdf_path, "")),
+                side_effect=[(path, "") for path in paths],
             ) as save_dialog,
+            patch(
+                "ui.main_window.render_photo",
+                return_value=rendered_photo,
+            ) as render_photo,
+            patch("ui.main_window.export_jpeg") as export_jpeg,
             patch("ui.main_window.export_png") as export_png,
             patch("ui.main_window.export_pdf") as export_pdf,
         ):
-            self.window.export_png_button.click()
-            self.window.export_pdf_button.click()
+            for action in actions:
+                action.trigger()
 
-        self.assertEqual(save_dialog.call_args_list[0].args[2], "一寸_4R.png")
-        self.assertEqual(save_dialog.call_args_list[1].args[2], "一寸_4R.pdf")
-        export_png.assert_called_once_with(self.window.sheet_image, png_path)
-        export_pdf.assert_called_once_with(self.window.sheet_image, pdf_path)
+        self.assertEqual(
+            [dialog_call.args[2] for dialog_call in save_dialog.call_args_list],
+            ["一寸.jpg", "一寸.png", "一寸_4R.jpg", "一寸_4R.png", "一寸_4R.pdf"],
+        )
+        self.assertEqual(
+            [dialog_call.args[3] for dialog_call in save_dialog.call_args_list],
+            [JPEG_FILE_FILTER, PNG_FILE_FILTER, JPEG_FILE_FILTER, PNG_FILE_FILTER, PDF_FILE_FILTER],
+        )
+        expected_render_call = call(
+            self.window.finished_photo,
+            target.width_mm,
+            target.height_mm,
+        )
+        self.assertEqual(
+            render_photo.call_args_list,
+            [expected_render_call, expected_render_call],
+        )
+        self.assertEqual(
+            export_jpeg.call_args_list,
+            [call(rendered_photo, paths[0]), call(self.window.sheet_image, paths[2])],
+        )
+        self.assertEqual(
+            export_png.call_args_list,
+            [call(rendered_photo, paths[1]), call(self.window.sheet_image, paths[3])],
+        )
+        export_pdf.assert_called_once_with(self.window.sheet_image, paths[4])
+        self.assertEqual(self.window.status_label.text(), f"相纸 PDF 已导出：{paths[4]}")
+
+    def test_cancelled_export_actions_do_not_render_or_write(self) -> None:
+        self.assertTrue(self.load_portrait())
+        actions = (
+            self.window.export_photo_jpeg_action,
+            self.window.export_photo_png_action,
+            self.window.export_sheet_jpeg_action,
+            self.window.export_sheet_png_action,
+            self.window.export_sheet_pdf_action,
+        )
 
         with (
             patch(
                 "ui.main_window.QFileDialog.getSaveFileName",
                 return_value=("", ""),
             ),
+            patch("ui.main_window.render_photo") as render_photo,
+            patch("ui.main_window.export_jpeg") as export_jpeg,
             patch("ui.main_window.export_png") as export_png,
             patch("ui.main_window.export_pdf") as export_pdf,
         ):
-            self.window.export_png_button.click()
-            self.window.export_pdf_button.click()
+            for action in actions:
+                action.trigger()
 
+        render_photo.assert_not_called()
+        export_jpeg.assert_not_called()
         export_png.assert_not_called()
         export_pdf.assert_not_called()
 
     def test_export_io_failures_are_reported_in_the_status_bar(self) -> None:
         self.assertTrue(self.load_portrait())
         cases = (
-            (self.window.export_png_button, "export_png", PermissionError("denied")),
-            (self.window.export_pdf_button, "export_pdf", IOError("disk full")),
+            (self.window.export_photo_jpeg_action, "export_jpeg", PermissionError("photo jpg")),
+            (self.window.export_photo_png_action, "export_png", IOError("photo png")),
+            (self.window.export_sheet_jpeg_action, "export_jpeg", IOError("sheet jpg")),
+            (self.window.export_sheet_png_action, "export_png", PermissionError("sheet png")),
+            (self.window.export_sheet_pdf_action, "export_pdf", IOError("sheet pdf")),
         )
 
-        for button, function_name, error in cases:
+        for action, function_name, error in cases:
             with self.subTest(function=function_name):
                 with (
                     patch(
@@ -1152,7 +1304,7 @@ class MainWindowTests(unittest.TestCase):
                     ),
                     patch(f"ui.main_window.{function_name}", side_effect=error),
                 ):
-                    button.click()
+                    action.trigger()
                 self.assertIn("导出", self.window.status_label.text())
                 self.assertIn(str(error), self.window.status_label.text())
 

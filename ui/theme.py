@@ -90,19 +90,14 @@ QFrame#outputSeparator {{
 }}
 
 QLabel#appTitle {{
-    color: {COLORS["text"]};
-    font-size: 21px;
+    color: {COLORS["primary"]};
+    font-size: 26px;
     font-weight: 700;
 }}
 
-QLabel#appSubtitle,
 QLabel#cardSubtitle,
 QLabel#statusLabel {{
     color: {COLORS["muted_text"]};
-}}
-
-QLabel#appSubtitle {{
-    font-size: 12px;
 }}
 
 QLabel#cardTitle,
@@ -289,7 +284,70 @@ QPushButton:disabled {{
     border-color: {COLORS["border"]};
 }}
 
+QToolButton {{
+    min-height: 34px;
+    padding: 0 26px 0 14px;
+    color: {COLORS["text"]};
+    background: {COLORS["control"]};
+    border: 1px solid {COLORS["border"]};
+    border-radius: 8px;
+    font-weight: 500;
+}}
+
+QToolButton:hover {{
+    background: {COLORS["control_hover"]};
+}}
+
+QToolButton:pressed {{
+    background: {COLORS["border"]};
+}}
+
+QToolButton:disabled {{
+    color: #666865;
+    background: {COLORS["control"]};
+    border-color: {COLORS["border"]};
+}}
+
+QToolButton::menu-indicator {{
+    image: url({_icon_url("chevron_down")});
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    right: 10px;
+    width: 10px;
+    height: 6px;
+}}
+
+QMenu {{
+    color: {COLORS["text"]};
+    background: {COLORS["control"]};
+    border: 1px solid {COLORS["border"]};
+    padding: 6px;
+}}
+
+QMenu::item {{
+    padding: 7px 26px 7px 12px;
+    border-radius: 6px;
+}}
+
+QMenu::item:selected {{
+    color: {COLORS["on_primary"]};
+    background: {COLORS["primary"]};
+}}
+
+QMenu::item:disabled {{
+    color: {COLORS["muted_text"]};
+    background: transparent;
+    font-size: 11px;
+}}
+
+QMenu::separator {{
+    height: 1px;
+    margin: 5px 8px;
+    background: {COLORS["border"]};
+}}
+
 QPushButton:focus,
+QToolButton:focus,
 QComboBox:focus,
 QDoubleSpinBox:focus,
 QRadioButton:focus,

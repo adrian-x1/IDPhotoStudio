@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QMimeData, QSize, QThreadPool, Qt
 from PySide6.QtGui import (
+    QAction,
     QColor,
     QCloseEvent,
     QDragEnterEvent,
@@ -32,11 +33,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
     QRadioButton,
     QSplitter,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -51,7 +54,7 @@ from core.crop import (
     minimum_face_height_for_300dpi,
 )
 from core.detect import detect_face
-from core.export import export_pdf, export_png
+from core.export import export_jpeg, export_pdf, export_png, render_photo
 from core.layout import LayoutResult, compose_sheet, solve_layout
 from core.matting import composite_background
 from ui.crop_view import CropView
@@ -75,6 +78,7 @@ SUPPORTED_IMAGE_SUFFIXES = (
 IMAGE_FILE_FILTER = "照片 (" + " ".join(
     f"*{suffix}" for suffix in SUPPORTED_IMAGE_SUFFIXES
 ) + ")"
+JPEG_FILE_FILTER = "JPEG 图像 (*.jpg *.jpeg)"
 PNG_FILE_FILTER = "PNG 图像 (*.png)"
 PDF_FILE_FILTER = "PDF 文档 (*.pdf)"
 
@@ -226,56 +230,56 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(4, 0, 4, 0)
         header_layout.setSpacing(8)
 
-        title_layout = QVBoxLayout()
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(0)
         app_title = QLabel("证件照排版")
         app_title.setObjectName("appTitle")
-        app_subtitle = QLabel("自动裁剪并排到 6 寸相纸")
-        app_subtitle.setObjectName("appSubtitle")
-        title_layout.addWidget(app_title)
-        title_layout.addWidget(app_subtitle)
-        header_layout.addLayout(title_layout)
+        header_layout.addWidget(app_title)
         header_layout.addStretch(1)
 
-        self.output_actions_container = QWidget()
-        self.output_actions_container.setObjectName("outputActionsPlaceholder")
-        self.output_actions_container.setFixedWidth(260)
-        self.output_actions_layout = QHBoxLayout(self.output_actions_container)
-        self.output_actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.output_actions_layout.setSpacing(8)
-        self.export_png_button = QPushButton("导出 PNG")
-        self.export_png_button.setAccessibleName("导出 PNG")
-        self.export_pdf_button = QPushButton("导出 PDF")
-        self.export_pdf_button.setAccessibleName("导出 PDF")
+        self.import_button = QPushButton("导入")
+        self.import_button.setMinimumHeight(36)
+        self.import_button.setAccessibleName("导入照片")
+        header_layout.addWidget(self.import_button)
+
+        self.export_button = QToolButton()
+        self.export_button.setText("导出")
+        self.export_button.setAccessibleName("导出")
+        self.export_button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self.export_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextOnly
+        )
+        self.export_button.setMinimumHeight(36)
+        self.export_menu = QMenu(self.export_button)
+        photo_section = QAction("单张证件照", self.export_menu)
+        photo_section.setEnabled(False)
+        photo_section.setSeparator(False)
+        self.export_menu.addAction(photo_section)
+        self.export_photo_jpeg_action = self.export_menu.addAction("导出 JPEG")
+        self.export_photo_png_action = self.export_menu.addAction("导出 PNG")
+        sheet_section = QAction("6 寸相纸", self.export_menu)
+        sheet_section.setEnabled(False)
+        sheet_section.setSeparator(False)
+        self.export_menu.addAction(sheet_section)
+        self.export_sheet_jpeg_action = self.export_menu.addAction("导出 JPEG")
+        self.export_sheet_png_action = self.export_menu.addAction("导出 PNG")
+        self.export_sheet_pdf_action = self.export_menu.addAction("导出 PDF")
+        self.export_button.setMenu(self.export_menu)
+        header_layout.addWidget(self.export_button)
+
+        self.header_separator = QFrame()
+        self.header_separator.setObjectName("outputSeparator")
+        self.header_separator.setFrameShape(QFrame.Shape.VLine)
+        self.header_separator.setContentsMargins(4, 0, 4, 0)
+        header_layout.addWidget(self.header_separator)
+
         self.print_button = QPushButton("打印")
         self.print_button.setAccessibleName("打印")
-        for button in (
-            self.export_png_button,
-            self.export_pdf_button,
-            self.print_button,
-        ):
-            button.setMinimumHeight(38)
-            button.setEnabled(False)
-            self.output_actions_layout.addWidget(button)
-        header_layout.addWidget(self.output_actions_container)
+        self.print_button.setProperty("variant", "primary")
+        self.print_button.setMinimumHeight(36)
+        header_layout.addWidget(self.print_button)
 
-        self.output_actions_separator = QFrame()
-        self.output_actions_separator.setObjectName("outputSeparator")
-        self.output_actions_separator.setFrameShape(QFrame.Shape.VLine)
-        self.output_actions_separator.setVisible(True)
-        header_layout.addWidget(self.output_actions_separator)
-
-        self.import_actions_container = QWidget()
-        import_actions_layout = QHBoxLayout(self.import_actions_container)
-        import_actions_layout.setContentsMargins(0, 0, 0, 0)
-        import_actions_layout.setSpacing(8)
-        self.import_button = QPushButton("导入照片")
-        self.import_button.setProperty("variant", "primary")
-        self.import_button.setMinimumHeight(38)
-        self.import_button.setAccessibleName("导入照片")
-        import_actions_layout.addWidget(self.import_button)
-        header_layout.addWidget(self.import_actions_container)
+        self._refresh_output_actions_enabled()
         root.addWidget(self.header_panel)
 
         self.parameters_panel = QFrame()
@@ -653,8 +657,21 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.import_button.clicked.connect(self._choose_image)
         self.crop_view.emptyStateActivated.connect(self._choose_image)
-        self.export_png_button.clicked.connect(self._choose_png_destination)
-        self.export_pdf_button.clicked.connect(self._choose_pdf_destination)
+        self.export_photo_jpeg_action.triggered.connect(
+            self._choose_photo_jpeg_destination
+        )
+        self.export_photo_png_action.triggered.connect(
+            self._choose_photo_png_destination
+        )
+        self.export_sheet_jpeg_action.triggered.connect(
+            self._choose_sheet_jpeg_destination
+        )
+        self.export_sheet_png_action.triggered.connect(
+            self._choose_sheet_png_destination
+        )
+        self.export_sheet_pdf_action.triggered.connect(
+            self._choose_sheet_pdf_destination
+        )
         self.print_button.clicked.connect(self._print_current_sheet)
         self.reset_crop_button.clicked.connect(self.crop_view.reset_to_auto)
         self.reset_spacing_button.clicked.connect(self._reset_spacing)
@@ -692,12 +709,78 @@ class MainWindow(QMainWindow):
         if path:
             self.load_image(path)
 
-    def _choose_png_destination(self) -> None:
+    def _choose_photo_jpeg_destination(self) -> None:
+        if self.finished_photo is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出单张 JPEG",
+            f"{self.spec_combo.currentText()}.jpg",
+            JPEG_FILE_FILTER,
+        )
+        if not path:
+            return
+        target = self._current_target_size()
+        photo = render_photo(
+            self.finished_photo,
+            target.width_mm,
+            target.height_mm,
+        )
+        try:
+            export_jpeg(photo, path)
+        except (IOError, PermissionError) as error:
+            self.status_label.setText(f"导出单张 JPEG 失败：{error}")
+            return
+        self.status_label.setText(f"单张 JPEG 已导出：{path}")
+
+    def _choose_photo_png_destination(self) -> None:
+        if self.finished_photo is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出单张 PNG",
+            f"{self.spec_combo.currentText()}.png",
+            PNG_FILE_FILTER,
+        )
+        if not path:
+            return
+        target = self._current_target_size()
+        photo = render_photo(
+            self.finished_photo,
+            target.width_mm,
+            target.height_mm,
+        )
+        try:
+            export_png(photo, path)
+        except (IOError, PermissionError) as error:
+            self.status_label.setText(f"导出单张 PNG 失败：{error}")
+            return
+        self.status_label.setText(f"单张 PNG 已导出：{path}")
+
+    def _choose_sheet_jpeg_destination(self) -> None:
         if self.sheet_image is None:
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "导出 PNG",
+            "导出相纸 JPEG",
+            f"{self.spec_combo.currentText()}_4R.jpg",
+            JPEG_FILE_FILTER,
+        )
+        if not path:
+            return
+        try:
+            export_jpeg(self.sheet_image, path)
+        except (IOError, PermissionError) as error:
+            self.status_label.setText(f"导出相纸 JPEG 失败：{error}")
+            return
+        self.status_label.setText(f"相纸 JPEG 已导出：{path}")
+
+    def _choose_sheet_png_destination(self) -> None:
+        if self.sheet_image is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出相纸 PNG",
             f"{self.spec_combo.currentText()}_4R.png",
             PNG_FILE_FILTER,
         )
@@ -706,16 +789,16 @@ class MainWindow(QMainWindow):
         try:
             export_png(self.sheet_image, path)
         except (IOError, PermissionError) as error:
-            self.status_label.setText(f"导出 PNG 失败：{error}")
+            self.status_label.setText(f"导出相纸 PNG 失败：{error}")
             return
-        self.status_label.setText(f"PNG 已导出：{path}")
+        self.status_label.setText(f"相纸 PNG 已导出：{path}")
 
-    def _choose_pdf_destination(self) -> None:
+    def _choose_sheet_pdf_destination(self) -> None:
         if self.sheet_image is None:
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "导出 PDF",
+            "导出相纸 PDF",
             f"{self.spec_combo.currentText()}_4R.pdf",
             PDF_FILE_FILTER,
         )
@@ -724,9 +807,9 @@ class MainWindow(QMainWindow):
         try:
             export_pdf(self.sheet_image, path)
         except (IOError, PermissionError) as error:
-            self.status_label.setText(f"导出 PDF 失败：{error}")
+            self.status_label.setText(f"导出相纸 PDF 失败：{error}")
             return
-        self.status_label.setText(f"PDF 已导出：{path}")
+        self.status_label.setText(f"相纸 PDF 已导出：{path}")
 
     def _print_current_sheet(self) -> None:
         if self.sheet_image is None or self.sheet_layout is None:
@@ -1164,7 +1247,7 @@ class MainWindow(QMainWindow):
             self.sheet_layout = None
             self.sheet_preview.clear_image("当前参数无法排入相纸")
             self._set_count(0)
-            self._set_output_actions_enabled(False)
+            self._refresh_output_actions_enabled()
             return
 
         self.sheet_layout = layout
@@ -1182,15 +1265,18 @@ class MainWindow(QMainWindow):
         )
         self.sheet_preview.set_image(self.sheet_image)
         self._set_count(layout.count)
-        self._set_output_actions_enabled(True)
+        self._refresh_output_actions_enabled()
 
-    def _set_output_actions_enabled(self, enabled: bool) -> None:
-        for button in (
-            self.export_png_button,
-            self.export_pdf_button,
-            self.print_button,
-        ):
-            button.setEnabled(enabled)
+    def _refresh_output_actions_enabled(self) -> None:
+        photo_enabled = self.finished_photo is not None
+        sheet_enabled = self.sheet_image is not None
+        self.export_photo_jpeg_action.setEnabled(photo_enabled)
+        self.export_photo_png_action.setEnabled(photo_enabled)
+        self.export_sheet_jpeg_action.setEnabled(sheet_enabled)
+        self.export_sheet_png_action.setEnabled(sheet_enabled)
+        self.export_sheet_pdf_action.setEnabled(sheet_enabled)
+        self.export_button.setEnabled(photo_enabled or sheet_enabled)
+        self.print_button.setEnabled(sheet_enabled)
 
     def _set_count(self, count: int | None) -> None:
         if count is None:
@@ -1209,7 +1295,7 @@ class MainWindow(QMainWindow):
         self.crop_preview.clear_image("等待自动裁剪")
         self.sheet_preview.clear_image("等待生成相纸排版")
         self._set_count(None)
-        self._set_output_actions_enabled(False)
+        self._refresh_output_actions_enabled()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._invalidate_crop_revision()

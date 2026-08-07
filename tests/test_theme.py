@@ -86,6 +86,9 @@ class ThemeTests(unittest.TestCase):
             'QFrame[segmentDivider="true"]',
             "QCheckBox::indicator:checked",
             "checkmark.svg",
+            "QToolButton::menu-indicator",
+            "QMenu::item:selected",
+            "QMenu::item:disabled",
         )
         for fragment in required_fragments:
             with self.subTest(fragment=fragment):
@@ -135,6 +138,17 @@ class ThemeTests(unittest.TestCase):
         )
         self.assertIn(theme.COLORS["focus"], theme.APP_STYLESHEET)
         self.assertNotIn("outline: none", theme.APP_STYLESHEET.lower())
+
+    def test_header_title_and_export_menu_use_existing_theme_tokens(self) -> None:
+        theme = self.load_theme()
+
+        self.assertIn(
+            "QLabel#appTitle {\n"
+            f'    color: {theme.COLORS["primary"]};\n'
+            "    font-size: 26px;",
+            theme.APP_STYLESHEET,
+        )
+        self.assertNotIn("QLabel#appSubtitle", theme.APP_STYLESHEET)
 
 
 if __name__ == "__main__":
