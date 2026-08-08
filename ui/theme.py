@@ -263,10 +263,15 @@ QRadioButton[segmentItem="true"]:disabled {{
     border-color: transparent;
 }}
 
+/* Zero width alone leaves QMacStyle free to paint its native check mark, so
+   the indicator also has to be given an empty image and no decoration. */
 QRadioButton[segmentItem="true"]::indicator {{
     width: 0;
     height: 0;
     margin: 0;
+    image: none;
+    background: transparent;
+    border: 0;
 }}
 
 QFrame[segmentDivider="true"] {{
@@ -470,6 +475,9 @@ QRadioButton#backgroundRed {{
 QRadioButton#backgroundOriginal::indicator {{
     width: 0;
     height: 0;
+    image: none;
+    background: transparent;
+    border: 0;
 }}
 
 QRadioButton#backgroundWhite::indicator,

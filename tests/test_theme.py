@@ -98,6 +98,28 @@ class ThemeTests(unittest.TestCase):
             with self.subTest(icon=path.name):
                 self.assertTrue(path.is_file())
 
+    def test_hidden_radio_indicators_disable_the_native_drawing(self) -> None:
+        """Zero-sizing an indicator is not enough on macOS.
+
+        QMacStyle keeps painting its native blue check mark unless the
+        indicator is also given an explicit empty image and background, which
+        showed up as a stray blue circle in the frozen app but not in a source
+        checkout.
+        """
+        stylesheet = self.load_theme().APP_STYLESHEET
+
+        hidden_indicators = (
+            'QRadioButton[segmentItem="true"]::indicator',
+            "QRadioButton#backgroundOriginal::indicator",
+        )
+        for selector in hidden_indicators:
+            with self.subTest(selector=selector):
+                start = stylesheet.index(selector)
+                block = stylesheet[start : stylesheet.index("}", start)]
+                self.assertIn("image: none", block)
+                self.assertIn("background: transparent", block)
+                self.assertIn("border: 0", block)
+
     def test_control_icons_resolve_from_pyinstaller_bundle(self) -> None:
         theme = self.load_theme()
 
