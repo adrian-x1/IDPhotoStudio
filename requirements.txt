@@ -1,5 +1,4 @@
 mediapipe==1.0.0
-rembg==2.0.77
 onnxruntime==1.23.2
 opencv-contrib-python==5.0.0.93
 pillow==12.3.0

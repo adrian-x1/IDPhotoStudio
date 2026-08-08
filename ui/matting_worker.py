@@ -1,4 +1,4 @@
-"""Background rembg execution isolated from the GUI thread."""
+"""Background matting inference isolated from the GUI thread."""
 
 from __future__ import annotations
 

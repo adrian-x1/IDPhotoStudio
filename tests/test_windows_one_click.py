@@ -34,8 +34,6 @@ class WindowsOneClickTests(unittest.TestCase):
             "mediapipe",
             "onnxruntime",
             "pyside6",
-            "rembg",
-            "pymatting",
             "cv2",
             "pil",
         ):

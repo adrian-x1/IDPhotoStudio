@@ -3,7 +3,7 @@
 from pathlib import Path
 import sys
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 
 # Platform icons are optional: a missing file must not break the build, since
@@ -20,7 +20,6 @@ windows_icon = _icon("icon.ico")
 datas = (
     collect_data_files("onnxruntime")
     + collect_data_files("mediapipe")
-    + copy_metadata("pymatting")
     + [
         ("assets/models/isnet-general-use.onnx", "assets/models"),
         ("assets/models/face_landmarker.task", "assets/models"),
@@ -33,18 +32,21 @@ binaries = collect_dynamic_libs("onnxruntime") + collect_dynamic_libs("mediapipe
 hiddenimports = [
     "numpy",
     "PIL",
-    "scipy",
-    "scipy.ndimage",
-    "skimage",
-    "skimage.morphology",
-    "pymatting",
-    "pymatting.alpha",
-    "pymatting.foreground",
-    "pymatting.util",
-    "tqdm",
-    "pooch",
-    "jsonschema",
     "onnxruntime",
+]
+# Matting runs onnxruntime directly, so rembg and its pymatting/numba/scipy
+# dependency chain are no longer installed.  Excluding them keeps PyInstaller
+# from pulling them back in through another package's optional import.
+# matplotlib is deliberately absent from this list: mediapipe imports it at the
+# top of its drawing utilities, so excluding it breaks face detection.
+excludes = [
+    "llvmlite",
+    "numba",
+    "pooch",
+    "pymatting",
+    "rembg",
+    "scipy",
+    "skimage",
 ]
 
 
@@ -57,7 +59,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
     optimize=0,
 )

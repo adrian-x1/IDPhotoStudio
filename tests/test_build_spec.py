@@ -24,18 +24,23 @@ class BuildSpecTests(unittest.TestCase):
         self.assertIn("face_landmarker.task", bundled_sources)
         self.assertIn("blaze_face_short_range.tflite", bundled_sources)
 
-    def test_pymatting_distribution_metadata_is_bundled(self) -> None:
-        datas = load_build_inputs()["datas"]
-        metadata_entries = [
-            (Path(source), Path(destination))
-            for source, destination in datas
-            if Path(destination).name.startswith("pymatting-")
-            and Path(destination).name.endswith(".dist-info")
-        ]
+    def test_retired_rembg_dependency_chain_stays_out_of_the_bundle(self) -> None:
+        inputs = load_build_inputs()
 
-        self.assertEqual(len(metadata_entries), 1)
-        metadata_source, _ = metadata_entries[0]
-        self.assertTrue((metadata_source / "METADATA").is_file())
+        self.assertNotIn("pymatting", inputs["hiddenimports"])
+        for module_name in ("llvmlite", "numba", "pymatting", "rembg", "scipy", "skimage"):
+            with self.subTest(module=module_name):
+                self.assertIn(module_name, inputs["excludes"])
+
+    def test_matplotlib_is_kept_because_mediapipe_imports_it(self) -> None:
+        self.assertNotIn("matplotlib", load_build_inputs()["excludes"])
+
+    def test_matting_dependencies_are_declared_as_hidden_imports(self) -> None:
+        hiddenimports = load_build_inputs()["hiddenimports"]
+
+        for module_name in ("numpy", "PIL", "onnxruntime"):
+            with self.subTest(module=module_name):
+                self.assertIn(module_name, hiddenimports)
 
 
 if __name__ == "__main__":

@@ -45,7 +45,7 @@ set "STAGE=5/8 dependency validation"
 call :stage "[5/8] Checking dependencies and imports"
 "%VENV_PY%" -m pip check >> "%LOG_FILE%" 2>&1
 if errorlevel 1 goto :fail
-"%VENV_PY%" -c "import cv2, mediapipe, onnxruntime, PIL, PySide6, pymatting, rembg; print('IMPORT_OK')" >> "%LOG_FILE%" 2>&1
+"%VENV_PY%" -c "import cv2, mediapipe, onnxruntime, PIL, PySide6; print('IMPORT_OK')" >> "%LOG_FILE%" 2>&1
 if errorlevel 1 goto :fail
 
 set "STAGE=6/8 test suite"
