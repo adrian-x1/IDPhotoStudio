@@ -952,6 +952,47 @@ class MainWindowTests(unittest.TestCase):
         self.assertTrue(self.window.rotate_photo_right_button.isEnabled())
         self.assertTrue(self.window.portrait_crop_radio.isEnabled())
         self.assertTrue(self.window.landscape_crop_radio.isEnabled())
+        # Reset is the only way back from a failed rotation, so it must stay live.
+        self.assertTrue(self.window.reset_crop_button.isEnabled())
+
+    def test_reset_stays_available_when_rotation_hides_the_face(self) -> None:
+        self.assertTrue(self.load_portrait())
+
+        # A photo turned upside down usually defeats face detection, but the
+        # user still has to be able to undo the rotation.
+        with patch("ui.main_window.detect_face", return_value=None):
+            self.window.rotate_photo_right_button.click()
+            self.window.rotate_photo_right_button.click()
+        self.app.processEvents()
+
+        self.assertEqual(self.window._photo_rotation_quarters, 2)
+        self.assertTrue(self.window.reset_crop_button.isEnabled())
+
+        self.window.reset_crop_button.click()
+        self.app.processEvents()
+
+        self.assertEqual(self.window._photo_rotation_quarters, 0)
+        self.assertEqual(
+            self.window.source_image.size, self.window._original_source_image.size
+        )
+
+    def test_rotation_buttons_do_not_keep_a_selected_look_after_clicking(self) -> None:
+        self.assertTrue(self.load_portrait())
+
+        for button in (
+            self.window.rotate_photo_left_button,
+            self.window.rotate_photo_right_button,
+        ):
+            with self.subTest(button=button.accessibleName()):
+                # Rotation is a one-shot action; unlike the orientation radios it
+                # has no persistent on state, so it must not retain focus styling.
+                self.assertFalse(button.isCheckable())
+                self.assertEqual(
+                    button.focusPolicy(), Qt.FocusPolicy.NoFocus
+                )
+                button.click()
+                self.app.processEvents()
+                self.assertFalse(button.hasFocus())
 
     def test_multiple_faces_show_non_blocking_largest_face_notice(self) -> None:
         detection = FaceDetectionResult(self.face, 2)

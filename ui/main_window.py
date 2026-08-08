@@ -430,9 +430,9 @@ class MainWindow(QMainWindow):
         self.rotate_photo_left_button.setToolTip(
             "照片向左旋转 90°；裁剪框方向不变，可连续点击"
         )
-        self.rotate_photo_left_button.setFocusPolicy(
-            Qt.FocusPolicy.StrongFocus
-        )
+        # Rotation applies immediately and has no on state.  Keeping focus would
+        # leave the segment styled like the selected orientation radio next to it.
+        self.rotate_photo_left_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.rotate_photo_left_button.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -456,9 +456,7 @@ class MainWindow(QMainWindow):
         self.rotate_photo_right_button.setToolTip(
             "照片向右旋转 90°；裁剪框方向不变，可连续点击"
         )
-        self.rotate_photo_right_button.setFocusPolicy(
-            Qt.FocusPolicy.StrongFocus
-        )
+        self.rotate_photo_right_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.rotate_photo_right_button.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -918,6 +916,21 @@ class MainWindow(QMainWindow):
         ):
             control.setEnabled(enabled)
 
+    def _photo_differs_from_ai_initial(self) -> bool:
+        """Report whether resetting would actually change anything."""
+        return bool(self._photo_rotation_quarters) or self._crop_orientation_landscape
+
+    def _refresh_reset_availability(self, *, face_detected: bool) -> None:
+        """Enable reset whenever there is a change to undo.
+
+        Reset must not depend on face detection alone: rotating a photo
+        upside down usually defeats the detector, and tying the button to it
+        left the user with no way back to the original orientation.
+        """
+        self.reset_crop_button.setEnabled(
+            face_detected or self._photo_differs_from_ai_initial()
+        )
+
     def _detect_current_face_and_refresh(self) -> bool:
         assert self.source_image is not None
         try:
@@ -926,7 +939,7 @@ class MainWindow(QMainWindow):
             self.face = None
             self.face_count = 0
             self._input_warnings = []
-            self.reset_crop_button.setEnabled(False)
+            self._refresh_reset_availability(face_detected=False)
             self._clear_processed_previews()
             self._set_matting_progress(False)
             self.status_label.setText(f"人脸检测失败：{error}")
@@ -1024,13 +1037,13 @@ class MainWindow(QMainWindow):
                 else ""
             )
             self._crop_mode_note = ""
-            self.reset_crop_button.setEnabled(True)
+            self._refresh_reset_availability(face_detected=True)
         else:
             box = self._centered_manual_box(aspect_ratio)
             self._input_warnings = []
             self._crop_space_warning = ""
             self._crop_mode_note = "未检测到人脸，已进入手动裁剪模式"
-            self.reset_crop_button.setEnabled(False)
+            self._refresh_reset_availability(face_detected=False)
 
         self.crop_view.set_content(
             self.source_image,
