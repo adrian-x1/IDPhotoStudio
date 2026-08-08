@@ -1,0 +1,116 @@
+name: Release
+
+# Pushing a tag like v1.0.0 builds both platforms and publishes a draft release.
+# The workflow can also be started by hand to smoke-test a build without tagging.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  macos:
+    # macos-14 and newer are Apple Silicon. mediapipe 1.0.0 ships no macOS
+    # x86_64 wheel, so an Intel build is not possible without downgrading it.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache the 170 MB matting model
+        uses: actions/cache@v4
+        with:
+          path: assets/models/isnet-general-use.onnx
+          key: isnet-general-use-60920e99
+
+      - run: python scripts/fetch_models.py
+
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
+      - run: python -m PyInstaller --clean --noconfirm build.spec
+
+      - name: Build DMG
+        run: bash scripts/make_dmg.sh "${{ github.ref_name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+
+      - name: Cache the 170 MB matting model
+        uses: actions/cache@v4
+        with:
+          path: assets/models/isnet-general-use.onnx
+          key: isnet-general-use-60920e99
+
+      - run: python scripts/fetch_models.py
+
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
+      - run: python -m PyInstaller --clean --noconfirm build.spec
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          if ($version -notmatch '^\d') { $version = "0.0.0" }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$version installer\windows.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*.exe
+          if-no-files-found: error
+
+  publish:
+    # Only tag pushes publish; manual runs stop after producing artifacts.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/*.dmg
+            artifacts/*.exe

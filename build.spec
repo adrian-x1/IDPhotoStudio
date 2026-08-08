@@ -1,7 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+import sys
+
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, copy_metadata
 
+
+# Platform icons are optional: a missing file must not break the build, since
+# `python -m PyInstaller build.spec` also runs on developer machines that have
+# not generated them yet.
+def _icon(name: str) -> str | None:
+    path = Path("assets") / name
+    return str(path) if path.is_file() else None
+
+
+mac_icon = _icon("icon.icns")
+windows_icon = _icon("icon.ico")
 
 datas = (
     collect_data_files("onnxruntime")
@@ -66,6 +80,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     contents_directory="_internal",
+    icon=windows_icon,
 )
 coll = COLLECT(
     exe,
@@ -76,3 +91,20 @@ coll = COLLECT(
     upx_exclude=[],
     name="idphoto",
 )
+
+# On macOS the COLLECT tree alone is not double-clickable; BUNDLE wraps it into
+# a real .app.  NSHighResolutionCapable keeps the UI sharp on Retina displays,
+# and NSRequiresAquaSystemAppearance=False lets the app follow dark mode.
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="IDPhotoStudio.app",
+        icon=mac_icon,
+        bundle_identifier="com.adrianx1.idphotostudio",
+        info_plist={
+            "CFBundleName": "IDPhotoStudio",
+            "CFBundleDisplayName": "IDPhotoStudio",
+            "NSHighResolutionCapable": True,
+            "NSRequiresAquaSystemAppearance": False,
+        },
+    )

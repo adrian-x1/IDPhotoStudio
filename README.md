@@ -1,0 +1,99 @@
+# IDPhotoStudio
+
+离线证件照制作工具。导入照片，自动抠图换底色，按标准规格裁剪排版，直接打印或导出。
+
+全部处理都在本机完成，照片不会上传到任何服务器。
+
+## 下载安装
+
+到 [Releases](https://github.com/adrian-x1/IDPhotoStudio/releases) 页面下载对应平台的安装包。
+
+### macOS（Apple Silicon）
+
+下载 `IDPhotoStudio-x.y.z-macOS-arm64.dmg`，双击打开后把 IDPhotoStudio 拖进「应用程序」文件夹。
+
+首次打开会提示「无法验证开发者」，因为安装包没有做 Apple 代码签名。绕过方法：在「应用程序」里**右键点击** IDPhotoStudio，选「打开」，再在弹窗里确认「打开」。之后就能正常双击启动了。
+
+如果右键仍被拦，去「系统设置 → 隐私与安全性」，在底部找到被阻止的提示，点「仍要打开」。
+
+仅支持 M 系列芯片的 Mac。Intel Mac 暂不支持，因为依赖的 mediapipe 1.0.0 没有发布 macOS x86_64 版本。
+
+### Windows（x64）
+
+下载 `IDPhotoStudio-x.y.z-Windows-x64-Setup.exe`，双击一路下一步。安装需要管理员权限。
+
+SmartScreen 可能提示「未知发布者」，点「更多信息 → 仍要运行」即可。同样是没做代码签名的缘故。
+
+## 打印说明
+
+用 EPSON L805 这类照片打印机时，驱动里的纸张类型必须选**光泽照片纸**。选普通纸会出现竖条纹和偏色。
+
+## 支持的规格
+
+一寸、二寸、三寸、大一寸、小一寸、大二寸、小二寸、简历照、普通话水平测试、英语四六级。
+
+全部按 300 DPI 输出。
+
+## 从源码运行
+
+需要 Python 3.13 x64。PySide6 6.9.3 不支持 3.14，装之前先确认版本。
+
+```bash
+git clone https://github.com/adrian-x1/IDPhotoStudio.git
+cd IDPhotoStudio
+
+python3.13 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# 下载 170 MB 的抠图模型（太大不能进 git，会校验 SHA-256）
+python scripts/fetch_models.py
+
+python main.py
+```
+
+跑测试：
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
+```
+
+## 自己打包
+
+```bash
+pip install -r requirements-build.txt
+python -m PyInstaller --clean --noconfirm build.spec
+```
+
+macOS 再打 DMG：
+
+```bash
+bash scripts/make_dmg.sh v1.0.0
+```
+
+Windows 再打安装器（需要 [Inno Setup 6](https://jrsoftware.org/isdl.php)）：
+
+```
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=1.0.0 installer\windows.iss
+```
+
+## 发布新版本
+
+打一个 `v` 开头的 tag 推上去，GitHub Actions 会在 macOS 和 Windows 上各构建一次，跑完测试后把安装包挂到一个**草稿** Release 上：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+到 Releases 页面检查产物，补好说明，再点 Publish。
+
+不想发版、只想验证构建能过，可以在 Actions 页面手动触发 Release 工作流，它会产出 artifact 但不创建 Release。
+
+## 技术栈
+
+- 抠图：rembg + isnet-general-use，onnxruntime CPU 推理
+- 人脸定位：MediaPipe FaceLandmarker
+- 界面：PySide6
+
+`core/` 里不含任何界面代码，可以脱离 GUI 单独测试。

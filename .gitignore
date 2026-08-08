@@ -8,3 +8,14 @@ dist/
 assets/models/*.onnx
 out/
 samples/
+windows-wheels/
+windows-one-click.log
+*.dmg
+installer/Output/
+
+# 内部开发文档，不公开
+WINDOWS.md
+PLAN.md
+产品定位.md
+sync-plan.sh
+AGENTS.md
