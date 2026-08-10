@@ -9,16 +9,28 @@ import sys
 import numpy as np
 from PIL import Image, ImageOps
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QEvent, QMimeData, QSize, QThreadPool, QTimer, Qt
+from PySide6.QtCore import (
+    QEvent,
+    QMimeData,
+    QRectF,
+    QSize,
+    QThreadPool,
+    QTimer,
+    Qt,
+)
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QFont,
     QCloseEvent,
     QDragEnterEvent,
     QDragLeaveEvent,
     QDropEvent,
     QFocusEvent,
+    QFontMetrics,
     QIcon,
+    QPainter,
+    QPaintEvent,
     QPixmap,
     QResizeEvent,
     QValidator,
@@ -69,7 +81,7 @@ from core.matting import composite_background
 from ui.crop_view import CropView
 from ui.matting_worker import MattingWorker
 from ui.printing import PrintOutcome, print_sheet
-from ui.theme import CONTROL_ICON_PATHS, apply_theme
+from ui.theme import COLORS, CONTROL_ICON_PATHS, apply_theme
 
 
 ORIGINAL_BACKGROUND = "保持原底"
@@ -183,6 +195,82 @@ class ImagePreview(QLabel):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+
+
+class SegmentRadioButton(QRadioButton):
+    """A segmented-control item that keeps radio semantics and paints itself.
+
+    Neither stock widget can do both jobs.  A plain QRadioButton cannot centre
+    its label -- Qt reserves indicator spacing even at zero indicator width and
+    QSS has no text-align for it -- while a checkable QPushButton centres fine
+    but reports itself to screen readers as a check box, losing the one-of-two
+    meaning.  Painting the whole control keeps the radio role and the centred
+    label, and leaves QMacStyle no sub-control to draw over, which is the flaw
+    behind the native circle that once showed up in the packaged app.
+    """
+
+    RADIUS = 6.0
+    PADDING_PX = 8
+    MIN_HEIGHT_PX = 30
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self.setProperty("segmentItem", True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self) -> QSize:
+        """Measure the label alone.
+
+        QRadioButton's own hint reserves room for an indicator that is never
+        drawn here, which made the widget ask for more width than the fixed
+        segmented control can give it.
+        """
+        metrics = QFontMetrics(self.font())
+        return QSize(
+            metrics.horizontalAdvance(self.text()) + 2 * self.PADDING_PX,
+            max(metrics.height() + 8, self.MIN_HEIGHT_PX),
+        )
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        box = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+
+        if not self.isEnabled():
+            text_color = QColor(COLORS["disabled_text"])
+        elif self.isChecked():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(COLORS["primary"]))
+            painter.drawRoundedRect(box, self.RADIUS, self.RADIUS)
+            text_color = QColor(COLORS["on_primary"])
+        elif self.underMouse():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(COLORS["control_hover"]))
+            painter.drawRoundedRect(box, self.RADIUS, self.RADIUS)
+            text_color = QColor(COLORS["text"])
+        else:
+            text_color = QColor(COLORS["muted_text"])
+
+        if self.hasFocus() and self.isEnabled():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(
+                QColor(COLORS["on_primary"] if self.isChecked() else COLORS["focus"])
+            )
+            painter.drawRoundedRect(box, self.RADIUS, self.RADIUS)
+
+        font = self.font()
+        font.setWeight(
+            QFont.Weight.DemiBold if self.isChecked() else QFont.Weight.Medium
+        )
+        painter.setFont(font)
+        painter.setPen(text_color)
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class SpacingSpinBox(QDoubleSpinBox):
@@ -653,22 +741,10 @@ class MainWindow(QMainWindow):
         crop_orientation_layout.setSpacing(0)
 
         self.crop_orientation_group = QButtonGroup(self)
-        # Checkable QPushButton, not QRadioButton: only QPushButton centres its
-        # label, and a radio keeps its indicator-to-label spacing even at zero
-        # indicator width.  The QButtonGroup below still makes them exclusive,
-        # so the single-choice semantics behind the `_radio` names hold.
-        self.portrait_crop_radio = QPushButton("竖版")
-        self.portrait_crop_radio.setCheckable(True)
-        self.portrait_crop_radio.setAutoDefault(False)
-        self.portrait_crop_radio.setProperty("segmentItem", True)
+        self.portrait_crop_radio = SegmentRadioButton("竖版")
         self.portrait_crop_radio.setAccessibleName("竖版裁剪框")
         self.portrait_crop_radio.setToolTip(
             "使用竖版裁剪框；照片方向不变，不改变 6 寸相纸排版"
-        )
-        self.portrait_crop_radio.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.portrait_crop_radio.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
         )
         self.portrait_crop_radio.setEnabled(False)
 
@@ -677,18 +753,10 @@ class MainWindow(QMainWindow):
         self.crop_orientation_divider.setFrameShape(QFrame.Shape.VLine)
         self.crop_orientation_divider.setFixedWidth(1)
 
-        self.landscape_crop_radio = QPushButton("横版")
-        self.landscape_crop_radio.setCheckable(True)
-        self.landscape_crop_radio.setAutoDefault(False)
-        self.landscape_crop_radio.setProperty("segmentItem", True)
+        self.landscape_crop_radio = SegmentRadioButton("横版")
         self.landscape_crop_radio.setAccessibleName("横版裁剪框")
         self.landscape_crop_radio.setToolTip(
             "使用横版裁剪框；照片方向不变，不改变 6 寸相纸排版"
-        )
-        self.landscape_crop_radio.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.landscape_crop_radio.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
         )
         self.landscape_crop_radio.setEnabled(False)
         for radio in (self.portrait_crop_radio, self.landscape_crop_radio):
@@ -714,6 +782,7 @@ class MainWindow(QMainWindow):
         self.count_number_label.setObjectName("countNumber")
         self.count_number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.count_number_label.setAccessibleName("排版张数数字")
+        self.count_number_label.setProperty("wide", False)
         self.count_unit_label = QLabel("张")
         self.count_unit_label.setObjectName("countUnit")
         self.count_unit_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1704,10 +1773,22 @@ class MainWindow(QMainWindow):
     def _set_count(self, count: int | None) -> None:
         if count is None:
             self.count_label.setText(EMPTY_COUNT_TEXT)
-            self.count_number_label.setText("—")
+            self._set_count_number("—")
             return
         self.count_label.setText(f"共 {count} 张")
-        self.count_number_label.setText(str(count))
+        self._set_count_number(str(count))
+
+    def _set_count_number(self, text: str) -> None:
+        """Shrink the digits once they no longer fit the counter column."""
+        self.count_number_label.setText(text)
+        wide = len(text) > 2
+        if self.count_number_label.property("wide") == wide:
+            return
+        self.count_number_label.setProperty("wide", wide)
+        style = self.count_number_label.style()
+        style.unpolish(self.count_number_label)
+        style.polish(self.count_number_label)
+        self.count_number_label.update()
 
     def _clear_processed_previews(self, *, keep_face: bool = False) -> None:
         if not keep_face:

@@ -81,8 +81,9 @@ class ThemeTests(unittest.TestCase):
             'QRadioButton[segment="true"]',
             'QWidget[segmentedControl="true"]',
             'QPushButton[segmentItem="true"]',
-            'QPushButton[segmentItem="true"]:checked',
-            'QPushButton[segmentItem="true"]:checked:focus',
+            # The orientation segments paint themselves (SegmentRadioButton),
+            # so only their metrics come from the sheet.
+            'QRadioButton[segmentItem="true"]',
             'QFrame[segmentDivider="true"]',
             "QCheckBox::indicator:checked",
             "checkmark.svg",
