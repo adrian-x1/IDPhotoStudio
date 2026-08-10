@@ -644,6 +644,28 @@ class MainWindowTests(unittest.TestCase):
         QTest.keyClick(spinbox, Qt.Key.Key_Return)
         self.app.processEvents()
 
+    def test_startup_leaves_the_spacing_fields_unfocused(self) -> None:
+        self.assertFalse(self.window.gap_spin.hasFocus())
+        self.assertFalse(self.window.margin_spin.hasFocus())
+        self.assertTrue(self.window.crop_view.hasFocus())
+
+    def test_reset_button_names_and_sits_with_the_fields_it_resets(self) -> None:
+        button = self.window.reset_spacing_button
+        self.assertEqual(button.text(), "恢复默认间距")
+
+        panel = self.window.parameters_panel
+        margin_bottom = self.window.margin_spin.mapTo(
+            panel,
+            self.window.margin_spin.rect().bottomLeft(),
+        ).y()
+        button_top = button.mapTo(panel, QPoint(0, 0)).y()
+        check_top = self.window.cut_lines_check.mapTo(panel, QPoint(0, 0)).y()
+
+        self.assertGreater(button_top, margin_bottom)
+        self.assertLess(button_top, check_top)
+        # Close enough to read as part of the same group.
+        self.assertLess(button_top - margin_bottom, 24)
+
     def test_clicking_into_an_empty_custom_size_accepts_typed_digits(self) -> None:
         self.assertTrue(self.load_portrait())
         self.select_custom_spec()
@@ -1999,8 +2021,8 @@ class MainWindowTests(unittest.TestCase):
             self.window.original_background_radio,
             self.window.gap_spin,
             self.window.margin_spin,
-            self.window.cut_lines_check,
             self.window.reset_spacing_button,
+            self.window.cut_lines_check,
         )
         y_positions = []
         for control in vertically_ordered_controls:
