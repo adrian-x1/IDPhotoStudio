@@ -313,6 +313,10 @@ class MainWindow(QMainWindow):
         self.resize(1200, 760)
         self._build_ui()
         self._connect_signals()
+        # macOS keeps buttons and combo boxes out of the tab chain, so Qt would
+        # hand the opening focus to the first text field -- the gap spin box --
+        # and ring it in accent yellow as if it were asking to be changed.
+        self.crop_view.setFocus()
 
     def _build_ui(self) -> None:
         self.app_shell = QWidget(self)
@@ -503,19 +507,24 @@ class MainWindow(QMainWindow):
         margin_row.addWidget(self.margin_spin, 1)
         margin_row.addWidget(self._field_label("mm"))
         parameter_rows.addLayout(margin_row)
-        parameter_rows.addSpacing(4)
+        parameter_rows.addSpacing(2)
+
+        # Sits directly under the two spin boxes it resets; parked at the far
+        # bottom of the panel it read as a reset for every setting above it.
+        self.reset_spacing_button = QPushButton("恢复默认间距")
+        self.reset_spacing_button.setProperty("variant", "quiet")
+        self.reset_spacing_button.setAccessibleName("重置间距和边距为默认值")
+        self.reset_spacing_button.setToolTip(
+            f"间距和边距恢复为 {DEFAULT_SPACING_MM:g}mm"
+        )
+        parameter_rows.addWidget(self.reset_spacing_button)
+        parameter_rows.addSpacing(6)
 
         self.cut_lines_check = QCheckBox("裁剪线")
         self.cut_lines_check.setChecked(True)
         self.cut_lines_check.setAccessibleName("显示裁剪线")
         parameter_rows.addWidget(self.cut_lines_check)
         parameter_rows.addStretch(1)
-
-        self.reset_spacing_button = QPushButton("恢复默认")
-        self.reset_spacing_button.setProperty("variant", "quiet")
-        self.reset_spacing_button.setAccessibleName("重置间距和边距为默认值")
-        self.reset_spacing_button.setToolTip("间距和边距恢复为 1.0mm")
-        parameter_rows.addWidget(self.reset_spacing_button)
 
         self.crop_view = CropView()
         self.original_preview = self.crop_view
