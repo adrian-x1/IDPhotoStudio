@@ -20,7 +20,12 @@ FONT_SENSITIVE = unittest.skipIf(
 
 from PIL import Image
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
-from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent
+from PySide6.QtGui import (
+    QAccessible,
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDropEvent,
+)
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -47,6 +52,7 @@ from core.detect import FaceDetectionResult
 from core.layout import CUSTOM_SIZE_MAX_MM, CUSTOM_SIZE_MIN_MM, compose_sheet
 from ui.main_window import (
     APP_NAME,
+    SegmentRadioButton,
     APP_TITLE_HTML,
     CUSTOM_SIZE_ENTRY_MAX_MM,
     DEFAULT_SPACING_MM,
@@ -211,12 +217,19 @@ class MainWindowTests(unittest.TestCase):
         self.assertIsNotNone(right_button)
         self.assertIsInstance(self.window.crop_orientation_group, QButtonGroup)
         self.assertTrue(self.window.crop_orientation_group.exclusive())
-        # Checkable QPushButton, not QRadioButton: a radio cannot centre its
-        # label.  QButtonGroup still supplies the exclusive behaviour.
-        self.assertIsInstance(portrait_radio, QPushButton)
-        self.assertIsInstance(landscape_radio, QPushButton)
-        self.assertTrue(portrait_radio.isCheckable())
-        self.assertTrue(landscape_radio.isCheckable())
+        # Self-painting radios: they must keep the radio accessible role while
+        # still centring their labels.  A checkable QPushButton centres too but
+        # reports itself to screen readers as a check box.
+        self.assertIsInstance(portrait_radio, SegmentRadioButton)
+        self.assertIsInstance(landscape_radio, SegmentRadioButton)
+        for radio in (portrait_radio, landscape_radio):
+            with self.subTest(radio=radio.accessibleName()):
+                interface = QAccessible.queryAccessibleInterface(radio)
+                self.assertIsNotNone(interface)
+                self.assertEqual(
+                    interface.role(),
+                    QAccessible.Role.RadioButton,
+                )
         self.assertEqual(left_button.text(), "")
         self.assertEqual(right_button.text(), "")
         self.assertFalse(left_button.icon().isNull())

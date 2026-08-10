@@ -18,6 +18,7 @@ COLORS = {
     "preview_background": "#1F2124",
     "text": "#E8E6E3",
     "muted_text": "#9A9A96",
+    "disabled_text": "#666865",
     "border": "#34383D",
     "border_strong": "#34383D",
     "primary": "#E8B04B",
@@ -140,6 +141,13 @@ QLabel#countNumber {{
     font-weight: 700;
 }}
 
+/* A custom 10x10mm spec fits 117 photos, and three digits at 64px overflow the
+   76px counter column -- both edges of the number get clipped.  Only the fixed
+   built-in specs stay inside two digits. */
+QLabel#countNumber[wide="true"] {{
+    font-size: 40px;
+}}
+
 QLabel#countUnit {{
     color: {COLORS["muted_text"]};
     font-size: 12px;
@@ -231,10 +239,18 @@ QWidget[segmentedControl="true"] {{
     border-radius: 8px;
 }}
 
-/* Segments are QPushButton rather than QRadioButton: only QPushButton honours
-   text-align, and QRadioButton keeps PM_RadioButtonLabelSpacing between its
-   indicator and the label even at zero indicator width, which pushes the text
-   off centre.  Exclusivity comes from the QButtonGroup instead. */
+/* Only the metrics live here.  SegmentRadioButton paints its own background,
+   focus ring and centred label, which is what keeps QMacStyle from drawing a
+   native indicator over the selected segment in the packaged app. */
+QRadioButton[segmentItem="true"] {{
+    min-height: 30px;
+    padding: 0 8px;
+    background: transparent;
+    border: 0;
+    font-size: 11px;
+    font-weight: 500;
+}}
+
 QPushButton[segmentItem="true"] {{
     min-height: 30px;
     padding: 0 8px;
@@ -257,25 +273,13 @@ QPushButton[segmentItem="true"]:pressed {{
     background: rgba(232, 176, 75, 31);
 }}
 
-/* Must stay after :pressed -- equal specificity, so the later rule wins. */
-QPushButton[segmentItem="true"]:checked {{
-    color: {COLORS["on_primary"]};
-    background: {COLORS["primary"]};
-    font-weight: 600;
-}}
-
 QPushButton[segmentItem="true"]:focus {{
     color: {COLORS["text"]};
     border: 1px solid {COLORS["focus"]};
 }}
 
-QPushButton[segmentItem="true"]:checked:focus {{
-    color: {COLORS["on_primary"]};
-    border: 1px solid {COLORS["on_primary"]};
-}}
-
 QPushButton[segmentItem="true"]:disabled {{
-    color: #666865;
+    color: {COLORS["disabled_text"]};
     background: transparent;
     border-color: transparent;
 }}
@@ -290,7 +294,7 @@ QFrame[segmentDivider="true"] {{
 }}
 
 QPushButton:disabled {{
-    color: #666865;
+    color: {COLORS["disabled_text"]};
     background: {COLORS["control"]};
     border-color: {COLORS["border"]};
 }}
@@ -314,7 +318,7 @@ QToolButton:pressed {{
 }}
 
 QToolButton:disabled {{
-    color: #666865;
+    color: {COLORS["disabled_text"]};
     background: {COLORS["control"]};
     border-color: {COLORS["border"]};
 }}
