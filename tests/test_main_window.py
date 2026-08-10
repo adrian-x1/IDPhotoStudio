@@ -92,6 +92,15 @@ class MainWindowTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.window.close()
+        # close() only clears the queue; a worker already running keeps going
+        # after the test ends, and Qt pool threads are invisible to Python's
+        # threading module, so a leak like that is undiagnosable from here.
+        # Draining makes each test pay for its own background work.
+        self.window._thread_pool.clear()
+        self.assertTrue(
+            self.window._thread_pool.waitForDone(30_000),
+            "抠图 worker 未在超时内结束，会拖慢并饿死后续测试",
+        )
         self.window.deleteLater()
         self.app.processEvents()
         self.temp_dir.cleanup()
@@ -556,9 +565,16 @@ class MainWindowTests(unittest.TestCase):
         self.commit_custom_size(self.window.custom_height_spin, 150)
         valid_box = self.window.crop_view.crop_box
 
-        with patch.object(self.window, "_request_matting"):
-            self.window.red_background_radio.setChecked(True)
-            self.app.processEvents()
+        # Matting has nothing to do with the warning priority under test, and
+        # the crop refreshes further down would each kick off a real ISNet run
+        # on a red background.  Those outlive the test: on a slow CI box one
+        # saturates the CPU for minutes and starves the next test's event loop.
+        matting = patch.object(self.window, "_request_matting")
+        matting.start()
+        self.addCleanup(matting.stop)
+
+        self.window.red_background_radio.setChecked(True)
+        self.app.processEvents()
         self.window.margin_spin.setValue(20)
         self.app.processEvents()
         self.assertEqual(self.window.crop_view.crop_box, valid_box)
