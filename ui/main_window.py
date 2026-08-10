@@ -73,6 +73,10 @@ from ui.theme import CONTROL_ICON_PATHS, apply_theme
 
 
 ORIGINAL_BACKGROUND = "保持原底"
+APP_NAME = "ID Photo Studio"
+# "Studio" drops to a light weight against the 600 set in the theme, so the
+# wordmark reads as one phrase with a quiet tail rather than two shouted words.
+APP_TITLE_HTML = 'ID Photo<span style="font-weight:300;"> Studio</span>'
 CUSTOM_SPEC_LABEL = "自定义"
 CUSTOM_SIZE_PLACEHOLDER = "--"
 # Wide enough that the widget never rejects a keystroke on its own; the real
@@ -351,7 +355,7 @@ class MainWindow(QMainWindow):
         application = QApplication.instance()
         if isinstance(application, QApplication):
             apply_theme(application)
-        self.setWindowTitle("证件照排版")
+        self.setWindowTitle(APP_NAME)
         self.setAcceptDrops(True)
         self.setMinimumSize(1040, 680)
         self.resize(1200, 760)
@@ -377,8 +381,10 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(4, 0, 4, 0)
         header_layout.setSpacing(8)
 
-        app_title = QLabel("证件照排版")
+        app_title = QLabel(APP_TITLE_HTML)
         app_title.setObjectName("appTitle")
+        app_title.setTextFormat(Qt.TextFormat.RichText)
+        app_title.setAccessibleName(APP_NAME)
         header_layout.addWidget(app_title)
         header_layout.addStretch(1)
 

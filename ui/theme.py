@@ -92,10 +92,16 @@ QFrame#outputSeparator {{
     color: {COLORS["border"]};
 }}
 
+/* Avenir Next is the macOS face; Segoe UI takes over on Windows, and the rest
+   are fallbacks so the wordmark keeps its proportions wherever it lands.  The
+   weight here covers "ID Photo"; the lighter "Studio" is set on its own span
+   in APP_TITLE_HTML. */
 QLabel#appTitle {{
     color: {COLORS["primary"]};
     font-size: 26px;
-    font-weight: 700;
+    font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.5px;
 }}
 
 QLabel#cardSubtitle,
