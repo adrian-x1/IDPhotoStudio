@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -45,6 +46,8 @@ from core.crop import (
 from core.detect import FaceDetectionResult
 from core.layout import CUSTOM_SIZE_MAX_MM, CUSTOM_SIZE_MIN_MM, compose_sheet
 from ui.main_window import (
+    APP_NAME,
+    APP_TITLE_HTML,
     CUSTOM_SIZE_ENTRY_MAX_MM,
     DEFAULT_SPACING_MM,
     CUSTOM_SIZE_PLACEHOLDER,
@@ -1750,7 +1753,15 @@ class MainWindowTests(unittest.TestCase):
             self.assertFalse(hasattr(self.window, removed_name))
         title = header.findChild(QLabel, "appTitle")
         self.assertIsNotNone(title)
-        self.assertEqual(title.text(), "证件照排版")
+        self.assertEqual(title.text(), APP_TITLE_HTML)
+        self.assertEqual(title.accessibleName(), APP_NAME)
+        self.assertEqual(title.textFormat(), Qt.TextFormat.RichText)
+        # The wordmark reads as plain text once the weight markup is stripped.
+        self.assertEqual(
+            re.sub(r"<[^>]+>", "", title.text()),
+            APP_NAME,
+        )
+        self.assertEqual(self.window.windowTitle(), APP_NAME)
         self.assertIsNone(header.findChild(QLabel, "appSubtitle"))
 
         header_widgets = [
