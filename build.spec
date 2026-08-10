@@ -17,9 +17,25 @@ def _icon(name: str) -> str | None:
 mac_icon = _icon("icon.icns")
 windows_icon = _icon("icon.ico")
 
+
+# Qt ships its own translated strings (line edit context menus, standard dialog
+# buttons).  PyInstaller does not collect them by default, so name the one
+# catalogue main.py loads; a missing file must not fail the build.
+def _qt_translation() -> list[tuple[str, str]]:
+    import PySide6
+
+    catalogue = (
+        Path(PySide6.__file__).parent / "Qt" / "translations" / "qtbase_zh_CN.qm"
+    )
+    if not catalogue.is_file():
+        return []
+    return [(str(catalogue), "PySide6/Qt/translations")]
+
+
 datas = (
     collect_data_files("onnxruntime")
     + collect_data_files("mediapipe")
+    + _qt_translation()
     + [
         ("assets/models/isnet-general-use.onnx", "assets/models"),
         ("assets/models/face_landmarker.task", "assets/models"),
@@ -97,6 +113,12 @@ coll = COLLECT(
 # On macOS the COLLECT tree alone is not double-clickable; BUNDLE wraps it into
 # a real .app.  NSHighResolutionCapable keeps the UI sharp on Retina displays,
 # and NSRequiresAquaSystemAppearance=False lets the app follow dark mode.
+#
+# CFBundleLocalizations is what makes the native Finder open/save panel speak
+# Chinese: macOS intersects this list with the user's AppleLanguages and hands
+# the winner to AppKit.  Without it the panel falls back to English even on a
+# Chinese system, which is why the same dialog is English when running from
+# source -- there the bundle is the Python interpreter's, not ours.
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
@@ -106,6 +128,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "IDPhotoStudio",
             "CFBundleDisplayName": "IDPhotoStudio",
+            "CFBundleDevelopmentRegion": "zh_CN",
+            "CFBundleLocalizations": ["zh_CN", "en"],
             "NSHighResolutionCapable": True,
             "NSRequiresAquaSystemAppearance": False,
         },
