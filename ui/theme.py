@@ -28,6 +28,8 @@ COLORS = {
     "warning_background": "rgba(232, 176, 75, 20)",
     "warning_border": "rgba(232, 176, 75, 72)",
     "warning_text": "#F0C674",
+    "error": "#E05252",
+    "error_text": "#F08A8A",
 }
 
 
@@ -153,6 +155,12 @@ QLabel#warningLabel {{
     border: 1px solid {COLORS["warning_border"]};
     border-radius: 8px;
     padding: 7px 10px;
+}}
+
+QLabel#warningLabel[severity="error"] {{
+    color: {COLORS["error_text"]};
+    background: rgba(224, 82, 82, 20);
+    border: 1px solid rgba(224, 82, 82, 72);
 }}
 
 QWidget#previewCanvas {{
@@ -402,6 +410,10 @@ QDoubleSpinBox {{
     background: {COLORS["control"]};
     border: 1px solid {COLORS["border"]};
     border-radius: 8px;
+}}
+
+QDoubleSpinBox[invalid="true"] {{
+    border: 1px solid {COLORS["error"]};
 }}
 
 QDoubleSpinBox:hover {{

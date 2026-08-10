@@ -9,6 +9,13 @@ from core.units import mm_to_px
 
 CUT_LINE_COLOR = (190, 190, 190)
 CUT_LINE_WIDTH_MM = 0.3
+PAPER_4R_MM = (102.0, 152.0)
+CUSTOM_SIZE_MIN_MM = 10.0
+CUSTOM_SIZE_MAX_MM = 152.0
+
+
+class LayoutTooLargeError(ValueError):
+    """Raised when no photo/paper rotation fits even one photo."""
 
 
 @dataclass(frozen=True)
@@ -27,7 +34,7 @@ def solve_layout(
     photo_height_mm: float,
     gap: float = 1.0,
     margin: float = 1.0,
-    paper: tuple[float, float] = (102, 152),
+    paper: tuple[float, float] = PAPER_4R_MM,
 ) -> LayoutResult:
     """Find the highest-capacity grid across photo and paper rotations."""
     candidates: list[LayoutResult] = []
@@ -61,6 +68,9 @@ def solve_layout(
                         paper_height_mm=paper_height_mm,
                     )
                 )
+
+    if not candidates:
+        raise LayoutTooLargeError("当前排版无法容纳此规格，请减小边距")
 
     return max(
         candidates,
