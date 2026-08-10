@@ -119,6 +119,12 @@ coll = COLLECT(
 # the winner to AppKit.  Without it the panel falls back to English even on a
 # Chinese system, which is why the same dialog is English when running from
 # source -- there the bundle is the Python interpreter's, not ours.
+#
+# Chinese is listed alone on purpose.  Adding "en" would hand an English panel
+# to anyone whose system is not Chinese, and the rest of this app has no
+# English at all, so a German or Japanese user would get a Chinese window with
+# an English file dialog bolted on.  With a single entry AppKit has nothing
+# else to choose and every user gets the Chinese panel.
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
@@ -129,7 +135,7 @@ if sys.platform == "darwin":
             "CFBundleName": "IDPhotoStudio",
             "CFBundleDisplayName": "IDPhotoStudio",
             "CFBundleDevelopmentRegion": "zh_CN",
-            "CFBundleLocalizations": ["zh_CN", "en"],
+            "CFBundleLocalizations": ["zh_CN"],
             "NSHighResolutionCapable": True,
             "NSRequiresAquaSystemAppearance": False,
         },

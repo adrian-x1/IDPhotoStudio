@@ -42,18 +42,20 @@ class BuildSpecTests(unittest.TestCase):
         self.assertIn("qtbase_zh_CN.qm", bundled)
         self.assertEqual(bundled["qtbase_zh_CN.qm"], "PySide6/Qt/translations")
 
-    def test_mac_bundle_declares_chinese_so_the_native_panel_is_localised(self) -> None:
+    def test_mac_bundle_declares_chinese_only_for_the_native_panel(self) -> None:
         """macOS picks the panel language from CFBundleLocalizations.
 
         Without the declaration AppKit serves the open/save panel in English
-        even on a Chinese system, so this is the only thing standing between
-        the packaged app and an English Finder dialog.
+        even on a Chinese system.  Chinese must also be the *only* entry:
+        listing "en" alongside it makes AppKit hand an English panel to every
+        user whose system is not Chinese, while the rest of the app stays
+        Chinese.
         """
         source = (PROJECT_ROOT / "build.spec").read_text(encoding="utf-8")
         _, separator, bundle_section = source.partition("if sys.platform == \"darwin\":")
         self.assertTrue(separator, "macOS BUNDLE block not found in build.spec")
 
-        self.assertIn('"CFBundleLocalizations": ["zh_CN", "en"]', bundle_section)
+        self.assertIn('"CFBundleLocalizations": ["zh_CN"]', bundle_section)
         self.assertIn('"CFBundleDevelopmentRegion": "zh_CN"', bundle_section)
 
     def test_matting_dependencies_are_declared_as_hidden_imports(self) -> None:
