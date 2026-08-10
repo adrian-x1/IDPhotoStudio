@@ -626,8 +626,7 @@ class MainWindowTests(unittest.TestCase):
             ],
         )
 
-    def type_into(self, spinbox, text: str) -> None:
-        """Drive a spinbox the way a person does: click, type, press Enter."""
+    def click_size_field(self, spinbox) -> None:
         line_edit = spinbox.lineEdit()
         QTest.mouseClick(
             line_edit,
@@ -635,6 +634,12 @@ class MainWindowTests(unittest.TestCase):
             pos=QPoint(line_edit.width() // 2, line_edit.height() // 2),
         )
         self.app.processEvents()
+
+    def type_into(self, spinbox, text: str) -> None:
+        """Arrive from elsewhere, click in, type, press Enter."""
+        spinbox.clearFocus()
+        self.app.processEvents()
+        self.click_size_field(spinbox)
         QTest.keyClicks(spinbox, text)
         QTest.keyClick(spinbox, Qt.Key.Key_Return)
         self.app.processEvents()
@@ -663,6 +668,31 @@ class MainWindowTests(unittest.TestCase):
 
         self.assertEqual(self.window.custom_width_spin.value(), 60)
         self.assertEqual(self.window._custom_width_mm, 60)
+
+    def test_clicking_again_inside_a_focused_size_field_edits_one_digit(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        self.type_into(self.window.custom_width_spin, "89")
+        self.type_into(self.window.custom_height_spin, "50")
+
+        spinbox = self.window.custom_width_spin
+        line_edit = spinbox.lineEdit()
+        self.click_size_field(spinbox)
+        self.assertTrue(line_edit.hasSelectedText())
+
+        # Already focused: this click is aimed at a digit, so the caret has to
+        # land there instead of the field re-selecting everything.
+        self.click_size_field(spinbox)
+        self.assertFalse(line_edit.hasSelectedText())
+
+        line_edit.setCursorPosition(1)
+        QTest.keyClick(spinbox, Qt.Key.Key_Backspace)
+        QTest.keyClicks(spinbox, "5")
+        QTest.keyClick(spinbox, Qt.Key.Key_Return)
+        self.app.processEvents()
+
+        self.assertEqual(spinbox.value(), 59)
+        self.assertEqual(self.window._custom_width_mm, 59)
 
     def test_typed_out_of_range_custom_size_is_reported_not_truncated(self) -> None:
         self.assertTrue(self.load_portrait())
