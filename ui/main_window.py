@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDragLeaveEvent,
     QDropEvent,
+    QFocusEvent,
     QIcon,
     QPixmap,
     QResizeEvent,
@@ -199,6 +200,7 @@ class CustomSizeSpinBox(QDoubleSpinBox):
         self.setKeyboardTracking(False)
         self.setAccessibleName(accessible_name)
         self.setProperty("invalid", False)
+        self._select_all_pending = False
         self.lineEdit().setPlaceholderText(CUSTOM_SIZE_PLACEHOLDER)
         self.lineEdit().installEventFilter(self)
         self.lineEdit().setText("")
@@ -229,18 +231,25 @@ class CustomSizeSpinBox(QDoubleSpinBox):
             min(max(self.value(), CUSTOM_SIZE_MIN_MM), CUSTOM_SIZE_MAX_MM)
         )
 
+    def focusInEvent(self, event: QFocusEvent) -> None:
+        super().focusInEvent(event)
+        # Qt only selects all on tab focus, so arriving by click would drop the
+        # caret mid-text and the next keystroke would extend the old number
+        # instead of replacing it.  Offer the whole number on that first click
+        # only: clicking again inside a field that already has focus means the
+        # user is aiming at one digit, so the caret must land where they aimed.
+        self._select_all_pending = True
+
     def eventFilter(self, watched: QWidget, event: QEvent) -> bool:
-        # Qt only selects all on tab focus, so a click would drop the caret
-        # mid-text and the next keystroke would extend the old number rather
-        # than replace it.  A plain click means "give me a different size", so
-        # select everything; a drag or double-click already carries its own
-        # selection and is left alone.
         if (
-            watched is self.lineEdit()
+            self._select_all_pending
+            and watched is self.lineEdit()
             and event.type() == QEvent.Type.MouseButtonRelease
-            and not self.lineEdit().hasSelectedText()
         ):
-            self.selectAll()
+            self._select_all_pending = False
+            # A drag that lands here already carries the user's own selection.
+            if not self.lineEdit().hasSelectedText():
+                self.selectAll()
         return super().eventFilter(watched, event)
 
 
