@@ -48,6 +48,7 @@ CONTROL_ICON_PATHS = {
     "checkmark": _ICON_DIR / "checkmark.svg",
     "rotate_left": _ICON_DIR / "rotate-left.svg",
     "rotate_right": _ICON_DIR / "rotate-right.svg",
+    "reset_spin": _ICON_DIR / "reset-spin.svg",
     "add_photo": _ICON_DIR / "add-photo.svg",
 }
 
@@ -224,20 +225,23 @@ QWidget[segmentedControl="true"] {{
     border-radius: 8px;
 }}
 
-QPushButton[segmentItem="true"],
-QRadioButton[segmentItem="true"] {{
+/* Segments are QPushButton rather than QRadioButton: only QPushButton honours
+   text-align, and QRadioButton keeps PM_RadioButtonLabelSpacing between its
+   indicator and the label even at zero indicator width, which pushes the text
+   off centre.  Exclusivity comes from the QButtonGroup instead. */
+QPushButton[segmentItem="true"] {{
     min-height: 30px;
-    padding: 0 9px;
+    padding: 0 8px;
     color: {COLORS["muted_text"]};
     background: transparent;
     border: 1px solid transparent;
     border-radius: 6px;
     font-size: 11px;
     font-weight: 500;
+    text-align: center;
 }}
 
-QPushButton[segmentItem="true"]:hover,
-QRadioButton[segmentItem="true"]:hover {{
+QPushButton[segmentItem="true"]:hover {{
     color: {COLORS["text"]};
     background: {COLORS["control_hover"]};
 }}
@@ -247,39 +251,27 @@ QPushButton[segmentItem="true"]:pressed {{
     background: rgba(232, 176, 75, 31);
 }}
 
-QRadioButton[segmentItem="true"]:checked {{
+/* Must stay after :pressed -- equal specificity, so the later rule wins. */
+QPushButton[segmentItem="true"]:checked {{
     color: {COLORS["on_primary"]};
     background: {COLORS["primary"]};
     font-weight: 600;
 }}
 
-QPushButton[segmentItem="true"]:focus,
-QRadioButton[segmentItem="true"]:focus {{
+QPushButton[segmentItem="true"]:focus {{
     color: {COLORS["text"]};
     border: 1px solid {COLORS["focus"]};
 }}
 
-QRadioButton[segmentItem="true"]:checked:focus {{
+QPushButton[segmentItem="true"]:checked:focus {{
     color: {COLORS["on_primary"]};
     border: 1px solid {COLORS["on_primary"]};
 }}
 
-QPushButton[segmentItem="true"]:disabled,
-QRadioButton[segmentItem="true"]:disabled {{
+QPushButton[segmentItem="true"]:disabled {{
     color: #666865;
     background: transparent;
     border-color: transparent;
-}}
-
-/* Zero width alone leaves QMacStyle free to paint its native check mark, so
-   the indicator also has to be given an empty image and no decoration. */
-QRadioButton[segmentItem="true"]::indicator {{
-    width: 0;
-    height: 0;
-    margin: 0;
-    image: none;
-    background: transparent;
-    border: 0;
 }}
 
 QFrame[segmentDivider="true"] {{
@@ -416,6 +408,28 @@ QDoubleSpinBox[invalid="true"] {{
     border: 1px solid {COLORS["error"]};
 }}
 
+/* Reset knob sits inside the gap/margin fields, left of the step arrows, so
+   those fields need room on the right that the plain spin boxes do not. */
+QDoubleSpinBox[withResetKnob="true"] {{
+    padding-right: 50px;
+}}
+
+QToolButton[resetKnob="true"] {{
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+}}
+
+QToolButton[resetKnob="true"]:hover {{
+    background: {COLORS["control_hover"]};
+}}
+
+QToolButton[resetKnob="true"]:pressed {{
+    background: {COLORS["border"]};
+}}
+
 QDoubleSpinBox:hover {{
     background: {COLORS["control_hover"]};
 }}
@@ -525,9 +539,9 @@ QCheckBox {{
     border-radius: 6px;
 }}
 
-QCheckBox:hover {{
-    background: {COLORS["control_hover"]};
-}}
+/* No :hover rule on purpose.  The check box stretches across the whole panel,
+   so a hover background lit up the entire row for a control that only needs to
+   report checked or unchecked. */
 
 QCheckBox::indicator {{
     width: 14px;

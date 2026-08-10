@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QLabel,
     QMenu,
+    QPushButton,
     QRadioButton,
     QStyle,
     QStyleOptionButton,
@@ -45,6 +46,7 @@ from core.detect import FaceDetectionResult
 from core.layout import CUSTOM_SIZE_MAX_MM, CUSTOM_SIZE_MIN_MM, compose_sheet
 from ui.main_window import (
     CUSTOM_SIZE_ENTRY_MAX_MM,
+    DEFAULT_SPACING_MM,
     CUSTOM_SIZE_PLACEHOLDER,
     CUSTOM_SPEC_LABEL,
     IMAGE_FILE_FILTER,
@@ -206,8 +208,12 @@ class MainWindowTests(unittest.TestCase):
         self.assertIsNotNone(right_button)
         self.assertIsInstance(self.window.crop_orientation_group, QButtonGroup)
         self.assertTrue(self.window.crop_orientation_group.exclusive())
-        self.assertIsInstance(portrait_radio, QRadioButton)
-        self.assertIsInstance(landscape_radio, QRadioButton)
+        # Checkable QPushButton, not QRadioButton: a radio cannot centre its
+        # label.  QButtonGroup still supplies the exclusive behaviour.
+        self.assertIsInstance(portrait_radio, QPushButton)
+        self.assertIsInstance(landscape_radio, QPushButton)
+        self.assertTrue(portrait_radio.isCheckable())
+        self.assertTrue(landscape_radio.isCheckable())
         self.assertEqual(left_button.text(), "")
         self.assertEqual(right_button.text(), "")
         self.assertFalse(left_button.icon().isNull())
@@ -581,7 +587,8 @@ class MainWindowTests(unittest.TestCase):
         )
         self.window.gap_spin.setValue(4)
         self.window.margin_spin.setValue(3)
-        self.window.reset_spacing_button.click()
+        self.window.gap_spin.reset_button.click()
+        self.window.margin_spin.reset_button.click()
         self.app.processEvents()
         self.assertEqual(self.window._custom_width_mm, 35)
         self.assertEqual(self.window._custom_height_mm, 50)
@@ -649,22 +656,75 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(self.window.margin_spin.hasFocus())
         self.assertTrue(self.window.crop_view.hasFocus())
 
-    def test_reset_button_names_and_sits_with_the_fields_it_resets(self) -> None:
-        button = self.window.reset_spacing_button
-        self.assertEqual(button.text(), "恢复默认间距")
+    def test_each_reset_knob_lives_in_its_field_and_resets_only_it(self) -> None:
+        self.assertFalse(hasattr(self.window, "reset_spacing_button"))
 
-        panel = self.window.parameters_panel
-        margin_bottom = self.window.margin_spin.mapTo(
-            panel,
-            self.window.margin_spin.rect().bottomLeft(),
-        ).y()
-        button_top = button.mapTo(panel, QPoint(0, 0)).y()
-        check_top = self.window.cut_lines_check.mapTo(panel, QPoint(0, 0)).y()
+        for spinbox, tooltip in (
+            (self.window.gap_spin, "恢复默认间距"),
+            (self.window.margin_spin, "恢复默认边距"),
+        ):
+            with self.subTest(field=spinbox.accessibleName()):
+                knob = spinbox.reset_button
+                self.assertIs(knob.parentWidget(), spinbox)
+                self.assertFalse(knob.icon().isNull())
+                self.assertEqual(knob.toolTip(), tooltip)
+                # Centred vertically and clear of the step arrows.
+                self.assertLessEqual(
+                    abs((knob.y() + knob.height() / 2) - spinbox.height() / 2),
+                    1,
+                )
+                self.assertLess(
+                    knob.x() + knob.width(),
+                    spinbox.width() - 20,
+                )
+                self.assertEqual(
+                    knob.focusPolicy(),
+                    Qt.FocusPolicy.NoFocus,
+                )
 
-        self.assertGreater(button_top, margin_bottom)
-        self.assertLess(button_top, check_top)
-        # Close enough to read as part of the same group.
-        self.assertLess(button_top - margin_bottom, 24)
+        self.window.gap_spin.setValue(6.5)
+        self.window.margin_spin.setValue(4.0)
+
+        self.window.gap_spin.reset_button.click()
+        self.assertEqual(self.window.gap_spin.value(), DEFAULT_SPACING_MM)
+        self.assertEqual(self.window.margin_spin.value(), 4.0)
+
+        self.window.margin_spin.reset_button.click()
+        self.assertEqual(self.window.margin_spin.value(), DEFAULT_SPACING_MM)
+
+    @FONT_SENSITIVE
+    def test_orientation_segments_are_equal_width_with_centred_labels(self) -> None:
+        self.assertTrue(self.load_portrait())
+        control = self.window.crop_orientation_control
+        portrait = self.window.portrait_crop_radio
+        landscape = self.window.landscape_crop_radio
+        self.app.processEvents()
+
+        self.assertEqual(portrait.width(), landscape.width())
+
+        # Scan the unchecked segment for label pixels: the checked one is a
+        # solid accent block, which leaves no background to compare against.
+        image = landscape.grab().toImage()
+        background = image.pixelColor(1, image.height() // 2).getRgb()[:3]
+        columns = [
+            x
+            for x in range(image.width())
+            if any(
+                sum(
+                    abs(a - b)
+                    for a, b in zip(
+                        image.pixelColor(x, y).getRgb()[:3], background
+                    )
+                )
+                > 90
+                for y in range(image.height())
+            )
+        ]
+        self.assertTrue(columns)
+        left_gap = min(columns)
+        right_gap = image.width() - 1 - max(columns)
+        self.assertLessEqual(abs(left_gap - right_gap), 1)
+        del control
 
     def test_clicking_into_an_empty_custom_size_accepts_typed_digits(self) -> None:
         self.assertTrue(self.load_portrait())
@@ -1621,13 +1681,14 @@ class MainWindowTests(unittest.TestCase):
             self.window.cropped_original.getpixel((0, 0)),
         )
 
-    def test_reset_button_restores_default_spacing_and_refreshes_layout(self) -> None:
+    def test_reset_knobs_restore_default_spacing_and_refresh_layout(self) -> None:
         self.load_portrait()
         self.window.gap_spin.setValue(6.5)
         self.window.margin_spin.setValue(4.0)
         reduced_count = self.window.count_label.text()
 
-        self.window.reset_spacing_button.click()
+        self.window.gap_spin.reset_button.click()
+        self.window.margin_spin.reset_button.click()
 
         self.assertEqual(self.window.gap_spin.value(), 1.0)
         self.assertEqual(self.window.margin_spin.value(), 1.0)
@@ -2021,7 +2082,6 @@ class MainWindowTests(unittest.TestCase):
             self.window.original_background_radio,
             self.window.gap_spin,
             self.window.margin_spin,
-            self.window.reset_spacing_button,
             self.window.cut_lines_check,
         )
         y_positions = []
