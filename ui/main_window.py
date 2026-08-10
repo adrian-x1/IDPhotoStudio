@@ -181,6 +181,49 @@ class ImagePreview(QLabel):
         )
 
 
+class SpacingSpinBox(QDoubleSpinBox):
+    """Millimetre field carrying a reset knob left of its step arrows.
+
+    ``QLineEdit.addAction`` was the obvious way to embed the knob, but Qt lays
+    those side widgets out against a stale line-edit height inside a spin box:
+    the button came out 8px low and overflowing the bottom edge.  Owning the
+    button and placing it in ``resizeEvent`` keeps it centred at any size.
+    """
+
+    ARROW_ZONE_PX = 28
+    KNOB_PX = 18
+
+    def __init__(self, accessible_name: str, reset_tooltip: str) -> None:
+        super().__init__()
+        self.setRange(0.0, 20.0)
+        self.setDecimals(1)
+        self.setSingleStep(0.5)
+        self.setValue(DEFAULT_SPACING_MM)
+        self.setAccessibleName(accessible_name)
+        self.setProperty("withResetKnob", True)
+
+        self.reset_button = QToolButton(self)
+        self.reset_button.setProperty("resetKnob", True)
+        self.reset_button.setIcon(QIcon(str(CONTROL_ICON_PATHS["reset_spin"])))
+        self.reset_button.setIconSize(QSize(13, 13))
+        self.reset_button.setToolTip(reset_tooltip)
+        self.reset_button.setAccessibleName(reset_tooltip)
+        self.reset_button.setFixedSize(self.KNOB_PX, self.KNOB_PX)
+        # Taking focus would leave the field ringed as if it were being edited.
+        self.reset_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.reset_button.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def reset_to_default(self) -> None:
+        self.setValue(DEFAULT_SPACING_MM)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.reset_button.move(
+            self.width() - self.ARROW_ZONE_PX - self.KNOB_PX,
+            (self.height() - self.KNOB_PX) // 2,
+        )
+
+
 class CustomSizeSpinBox(QDoubleSpinBox):
     """Millimetre entry whose empty text means "not filled in yet".
 
@@ -493,7 +536,7 @@ class MainWindow(QMainWindow):
         gap_row = QHBoxLayout()
         gap_row.setContentsMargins(0, 0, 0, 0)
         gap_row.setSpacing(8)
-        self.gap_spin = self._millimetre_spinbox("照片间距")
+        self.gap_spin = SpacingSpinBox("照片间距", "恢复默认间距")
         gap_row.addWidget(self.gap_spin, 1)
         gap_row.addWidget(self._field_label("mm"))
         parameter_rows.addLayout(gap_row)
@@ -503,22 +546,11 @@ class MainWindow(QMainWindow):
         margin_row = QHBoxLayout()
         margin_row.setContentsMargins(0, 0, 0, 0)
         margin_row.setSpacing(8)
-        self.margin_spin = self._millimetre_spinbox("相纸边距")
+        self.margin_spin = SpacingSpinBox("相纸边距", "恢复默认边距")
         margin_row.addWidget(self.margin_spin, 1)
         margin_row.addWidget(self._field_label("mm"))
         parameter_rows.addLayout(margin_row)
-        parameter_rows.addSpacing(2)
-
-        # Sits directly under the two spin boxes it resets; parked at the far
-        # bottom of the panel it read as a reset for every setting above it.
-        self.reset_spacing_button = QPushButton("恢复默认间距")
-        self.reset_spacing_button.setProperty("variant", "quiet")
-        self.reset_spacing_button.setAccessibleName("重置间距和边距为默认值")
-        self.reset_spacing_button.setToolTip(
-            f"间距和边距恢复为 {DEFAULT_SPACING_MM:g}mm"
-        )
-        parameter_rows.addWidget(self.reset_spacing_button)
-        parameter_rows.addSpacing(6)
+        parameter_rows.addSpacing(4)
 
         self.cut_lines_check = QCheckBox("裁剪线")
         self.cut_lines_check.setChecked(True)
@@ -605,14 +637,22 @@ class MainWindow(QMainWindow):
         self.crop_orientation_control = QFrame()
         self.crop_orientation_control.setProperty("segmentedControl", True)
         self.crop_orientation_control.setAccessibleName("裁剪框方向")
-        self.crop_orientation_control.setFixedWidth(106)
+        # 107 rather than 106 so the two segments split the inner width evenly
+        # (107 - 2 margins - 1 divider = 104, i.e. 52 each).
+        self.crop_orientation_control.setFixedWidth(107)
         self.crop_orientation_control.setEnabled(False)
         crop_orientation_layout = QHBoxLayout(self.crop_orientation_control)
         crop_orientation_layout.setContentsMargins(1, 1, 1, 1)
         crop_orientation_layout.setSpacing(0)
 
         self.crop_orientation_group = QButtonGroup(self)
-        self.portrait_crop_radio = QRadioButton("竖版")
+        # Checkable QPushButton, not QRadioButton: only QPushButton centres its
+        # label, and a radio keeps its indicator-to-label spacing even at zero
+        # indicator width.  The QButtonGroup below still makes them exclusive,
+        # so the single-choice semantics behind the `_radio` names hold.
+        self.portrait_crop_radio = QPushButton("竖版")
+        self.portrait_crop_radio.setCheckable(True)
+        self.portrait_crop_radio.setAutoDefault(False)
         self.portrait_crop_radio.setProperty("segmentItem", True)
         self.portrait_crop_radio.setAccessibleName("竖版裁剪框")
         self.portrait_crop_radio.setToolTip(
@@ -630,7 +670,9 @@ class MainWindow(QMainWindow):
         self.crop_orientation_divider.setFrameShape(QFrame.Shape.VLine)
         self.crop_orientation_divider.setFixedWidth(1)
 
-        self.landscape_crop_radio = QRadioButton("横版")
+        self.landscape_crop_radio = QPushButton("横版")
+        self.landscape_crop_radio.setCheckable(True)
+        self.landscape_crop_radio.setAutoDefault(False)
         self.landscape_crop_radio.setProperty("segmentItem", True)
         self.landscape_crop_radio.setAccessibleName("横版裁剪框")
         self.landscape_crop_radio.setToolTip(
@@ -796,20 +838,14 @@ class MainWindow(QMainWindow):
         label.setObjectName("fieldLabel")
         return label
 
-    @staticmethod
-    def _millimetre_spinbox(accessible_name: str) -> QDoubleSpinBox:
-        spinbox = QDoubleSpinBox()
-        spinbox.setRange(0.0, 20.0)
-        spinbox.setDecimals(1)
-        spinbox.setSingleStep(0.5)
-        spinbox.setValue(DEFAULT_SPACING_MM)
-        spinbox.setAccessibleName(accessible_name)
-        return spinbox
+    def _reset_gap(self) -> None:
+        """Restore photo spacing alone; valueChanged refreshes the layout."""
+        self.gap_spin.reset_to_default()
+        self._clear_parameter_focus()
 
-    def _reset_spacing(self) -> None:
-        """Restore gap and margin to their defaults, refreshing layout once."""
-        self.gap_spin.setValue(DEFAULT_SPACING_MM)
-        self.margin_spin.setValue(DEFAULT_SPACING_MM)
+    def _reset_margin(self) -> None:
+        """Restore paper margin alone; valueChanged refreshes the layout."""
+        self.margin_spin.reset_to_default()
         self._clear_parameter_focus()
 
     def _connect_signals(self) -> None:
@@ -832,7 +868,8 @@ class MainWindow(QMainWindow):
         )
         self.print_button.clicked.connect(self._print_current_sheet)
         self.reset_crop_button.clicked.connect(self._reset_to_ai_initial)
-        self.reset_spacing_button.clicked.connect(self._reset_spacing)
+        self.gap_spin.reset_button.clicked.connect(self._reset_gap)
+        self.margin_spin.reset_button.clicked.connect(self._reset_margin)
         self.rotate_photo_left_button.clicked.connect(self._rotate_photo_left)
         self.rotate_photo_right_button.clicked.connect(self._rotate_photo_right)
         self.portrait_crop_radio.toggled.connect(

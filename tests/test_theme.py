@@ -81,8 +81,8 @@ class ThemeTests(unittest.TestCase):
             'QRadioButton[segment="true"]',
             'QWidget[segmentedControl="true"]',
             'QPushButton[segmentItem="true"]',
-            'QRadioButton[segmentItem="true"]',
-            'QRadioButton[segmentItem="true"]:checked:focus',
+            'QPushButton[segmentItem="true"]:checked',
+            'QPushButton[segmentItem="true"]:checked:focus',
             'QFrame[segmentDivider="true"]',
             "QCheckBox::indicator:checked",
             "checkmark.svg",
@@ -108,10 +108,7 @@ class ThemeTests(unittest.TestCase):
         """
         stylesheet = self.load_theme().APP_STYLESHEET
 
-        hidden_indicators = (
-            'QRadioButton[segmentItem="true"]::indicator',
-            "QRadioButton#backgroundOriginal::indicator",
-        )
+        hidden_indicators = ("QRadioButton#backgroundOriginal::indicator",)
         for selector in hidden_indicators:
             with self.subTest(selector=selector):
                 start = stylesheet.index(selector)
@@ -140,7 +137,7 @@ class ThemeTests(unittest.TestCase):
                 spec.loader.exec_module(bundled_theme)
 
             self.assertEqual(bundled_theme._ICON_DIR, bundled_icon_dir)
-            self.assertEqual(len(bundled_theme.CONTROL_ICON_PATHS), 7)
+            self.assertEqual(len(bundled_theme.CONTROL_ICON_PATHS), 8)
             for path in bundled_theme.CONTROL_ICON_PATHS.values():
                 with self.subTest(icon=path.name):
                     self.assertTrue(path.is_file())
