@@ -191,7 +191,8 @@ class SpacingSpinBox(QDoubleSpinBox):
     """
 
     ARROW_ZONE_PX = 28
-    KNOB_PX = 18
+    KNOB_PX = 28
+    KNOB_ICON_PX = 20
 
     def __init__(self, accessible_name: str, reset_tooltip: str) -> None:
         super().__init__()
@@ -205,7 +206,7 @@ class SpacingSpinBox(QDoubleSpinBox):
         self.reset_button = QToolButton(self)
         self.reset_button.setProperty("resetKnob", True)
         self.reset_button.setIcon(QIcon(str(CONTROL_ICON_PATHS["reset_spin"])))
-        self.reset_button.setIconSize(QSize(13, 13))
+        self.reset_button.setIconSize(QSize(self.KNOB_ICON_PX, self.KNOB_ICON_PX))
         self.reset_button.setToolTip(reset_tooltip)
         self.reset_button.setAccessibleName(reset_tooltip)
         self.reset_button.setFixedSize(self.KNOB_PX, self.KNOB_PX)
