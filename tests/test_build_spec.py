@@ -35,12 +35,32 @@ class BuildSpecTests(unittest.TestCase):
     def test_matplotlib_is_kept_because_mediapipe_imports_it(self) -> None:
         self.assertNotIn("matplotlib", load_build_inputs()["excludes"])
 
-    def test_qt_chinese_catalogue_is_bundled_for_the_translator(self) -> None:
-        datas = load_build_inputs()["datas"]
-        bundled = {Path(source).name: destination for source, destination in datas}
+    def test_qt_translations_are_left_to_the_pyinstaller_hook(self) -> None:
+        """Naming the catalogue here would hardcode a path that moves.
 
-        self.assertIn("qtbase_zh_CN.qm", bundled)
-        self.assertEqual(bundled["qtbase_zh_CN.qm"], "PySide6/Qt/translations")
+        PyInstaller's Qt hook collects the "qtbase" catalogue declared by
+        QtCore into PySide6/Qt/translations on every platform except Windows,
+        where it lands in PySide6/translations.  An explicit entry pointing at
+        the macOS layout silently collected nothing on Windows and failed this
+        suite before PyInstaller ever ran.
+        """
+        datas = load_build_inputs()["datas"]
+        bundled_sources = {Path(source).name for source, _ in datas}
+
+        self.assertFalse({name for name in bundled_sources if name.endswith(".qm")})
+
+    def test_app_version_comes_from_the_release_tag(self) -> None:
+        namespace = load_build_inputs()
+        self.assertEqual(namespace["app_version"], "0.0.0")
+
+        source = (PROJECT_ROOT / "build.spec").read_text(encoding="utf-8")
+        self.assertIn('"CFBundleShortVersionString": app_version', source)
+        self.assertIn('"CFBundleVersion": app_version', source)
+
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("APP_VERSION: ${{ github.ref_name }}"), 2)
 
     def test_mac_bundle_declares_chinese_only_for_the_native_panel(self) -> None:
         """macOS picks the panel language from CFBundleLocalizations.
