@@ -21,13 +21,44 @@ def _configure_model_environment() -> None:
 
 _configure_model_environment()
 
+from PySide6.QtCore import QLibraryInfo, QTranslator  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from ui.main_window import MainWindow  # noqa: E402
 
 
+QT_TRANSLATION_NAME = "qtbase_zh_CN"
+
+
+def _translation_directories() -> list[Path]:
+    return [
+        Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)),
+        _resource_root() / "PySide6" / "Qt" / "translations",
+    ]
+
+
+def install_chinese_translations(app: QApplication) -> QTranslator | None:
+    """Give Qt's own widgets Chinese text.
+
+    Nothing here is picked up from the system locale: macOS reports this
+    process as English unless the bundle claims Chinese support, which leaves
+    Qt-drawn strings -- the line edit context menu, standard dialog buttons --
+    in English even on a Chinese system.  Loading the catalogue by name sets
+    them regardless.  The native file panel is localised separately, by the
+    CFBundleLocalizations entry in build.spec.
+    """
+    translator = QTranslator(app)
+    for directory in _translation_directories():
+        if translator.load(QT_TRANSLATION_NAME, str(directory)):
+            app.installTranslator(translator)
+            return translator
+    return None
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
+    # Held on the app so the catalogue outlives this function.
+    app._chinese_translator = install_chinese_translations(app)
     window = MainWindow()
     window.show()
     return app.exec()
