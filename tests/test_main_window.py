@@ -42,8 +42,10 @@ from core.crop import (
     calculate_crop_box,
 )
 from core.detect import FaceDetectionResult
-from core.layout import compose_sheet
+from core.layout import CUSTOM_SIZE_MAX_MM, CUSTOM_SIZE_MIN_MM, compose_sheet
 from ui.main_window import (
+    CUSTOM_SIZE_ENTRY_MAX_MM,
+    CUSTOM_SIZE_PLACEHOLDER,
     CUSTOM_SPEC_LABEL,
     IMAGE_FILE_FILTER,
     JPEG_FILE_FILTER,
@@ -435,7 +437,11 @@ class MainWindowTests(unittest.TestCase):
 
         self.assertTrue(self.window.custom_size_row.isVisible())
         self.assertEqual(self.window.custom_width_spin.minimum(), 0.0)
-        self.assertEqual(self.window.custom_width_spin.specialValueText(), "--")
+        self.assertEqual(self.window.custom_width_spin.text(), "")
+        self.assertEqual(
+            self.window.custom_width_spin.lineEdit().placeholderText(),
+            CUSTOM_SIZE_PLACEHOLDER,
+        )
         self.assertIsNone(self.window.crop_view.crop_box)
         self.assertIs(self.window.face, detected_face)
         self.assertIsNone(self.window.cropped_original)
@@ -619,6 +625,130 @@ class MainWindowTests(unittest.TestCase):
                 "35x50mm_4R.pdf",
             ],
         )
+
+    def type_into(self, spinbox, text: str) -> None:
+        """Drive a spinbox the way a person does: click, type, press Enter."""
+        line_edit = spinbox.lineEdit()
+        QTest.mouseClick(
+            line_edit,
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(line_edit.width() // 2, line_edit.height() // 2),
+        )
+        self.app.processEvents()
+        QTest.keyClicks(spinbox, text)
+        QTest.keyClick(spinbox, Qt.Key.Key_Return)
+        self.app.processEvents()
+
+    def test_clicking_into_an_empty_custom_size_accepts_typed_digits(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+
+        self.type_into(self.window.custom_width_spin, "99")
+
+        self.assertEqual(self.window.custom_width_spin.value(), 99)
+        self.assertEqual(self.window._custom_width_mm, 99)
+        self.assertFalse(self.window.custom_width_spin.property("invalid"))
+        self.assertEqual(self.window.warning_label.text(), "")
+
+        self.type_into(self.window.custom_height_spin, "50")
+        self.assertEqual(self.window._custom_height_mm, 50)
+        self.assertIsNotNone(self.window.crop_view.crop_box)
+
+    def test_clicking_into_a_filled_custom_size_replaces_the_old_number(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        self.type_into(self.window.custom_width_spin, "35")
+
+        self.type_into(self.window.custom_width_spin, "60")
+
+        self.assertEqual(self.window.custom_width_spin.value(), 60)
+        self.assertEqual(self.window._custom_width_mm, 60)
+
+    def test_typed_out_of_range_custom_size_is_reported_not_truncated(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        self.type_into(self.window.custom_width_spin, "35")
+        self.type_into(self.window.custom_height_spin, "50")
+        committed_box = self.window.crop_view.crop_box
+
+        for typed, expected in (("160", 160), ("200", 200), ("1000", 1000)):
+            with self.subTest(typed=typed):
+                self.type_into(self.window.custom_width_spin, typed)
+                self.assertEqual(self.window.custom_width_spin.value(), expected)
+                self.assertEqual(self.window._custom_width_mm, 35)
+                self.assertTrue(
+                    self.window.custom_width_spin.property("invalid")
+                )
+                self.assertEqual(
+                    self.window.warning_label.text(),
+                    "宽度需在 10 - 152 mm 之间",
+                )
+                self.assertEqual(self.window.crop_view.crop_box, committed_box)
+
+        self.type_into(self.window.custom_width_spin, "35")
+        self.assertFalse(self.window.custom_width_spin.property("invalid"))
+        self.assertEqual(self.window.warning_label.text(), "")
+
+    def test_entry_range_never_rejects_a_keystroke_below_its_maximum(self) -> None:
+        spinbox = self.window.custom_width_spin
+        self.assertGreater(spinbox.maximum(), CUSTOM_SIZE_MAX_MM)
+        self.assertEqual(spinbox.maximum(), CUSTOM_SIZE_ENTRY_MAX_MM)
+
+        self.select_custom_spec()
+        line_edit = spinbox.lineEdit()
+        line_edit.selectAll()
+        typed = ""
+        for character in "200":
+            QTest.keyClicks(spinbox, character)
+            typed += character
+            self.assertEqual(spinbox.lineEdit().text(), typed)
+
+    def test_clearing_a_custom_size_returns_to_the_unfilled_state(self) -> None:
+        self.assertTrue(self.load_portrait())
+        detected_face = self.window.face
+        self.select_custom_spec()
+        self.type_into(self.window.custom_width_spin, "35")
+        self.type_into(self.window.custom_height_spin, "50")
+        self.assertIsNotNone(self.window.crop_view.crop_box)
+
+        spinbox = self.window.custom_width_spin
+        spinbox.lineEdit().selectAll()
+        QTest.keyClick(spinbox, Qt.Key.Key_Backspace)
+        QTest.keyClick(spinbox, Qt.Key.Key_Return)
+        self.app.processEvents()
+
+        self.assertEqual(spinbox.text(), "")
+        self.assertIsNone(self.window._custom_width_mm)
+        self.assertIsNone(self.window.crop_view.crop_box)
+        self.assertFalse(spinbox.property("invalid"))
+        self.assertIs(self.window.face, detected_face)
+        self.assertFalse(self.window.export_button.isEnabled())
+
+        self.type_into(spinbox, "40")
+        self.assertEqual(self.window._custom_width_mm, 40)
+        self.assertIsNotNone(self.window.crop_view.crop_box)
+
+    def test_custom_size_arrows_stay_inside_the_valid_range(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        spinbox = self.window.custom_width_spin
+        spinbox.setFocus()
+        self.app.processEvents()
+
+        spinbox.stepUp()
+        self.assertEqual(spinbox.value(), CUSTOM_SIZE_MIN_MM)
+        spinbox.clearFocus()
+        self.app.processEvents()
+        self.assertFalse(spinbox.property("invalid"))
+        self.assertEqual(self.window.warning_label.text(), "")
+        self.assertEqual(self.window._custom_width_mm, CUSTOM_SIZE_MIN_MM)
+
+        spinbox.stepDown()
+        self.assertEqual(spinbox.value(), CUSTOM_SIZE_MIN_MM)
+
+        spinbox.setValue(CUSTOM_SIZE_MAX_MM)
+        spinbox.stepUp()
+        self.assertEqual(spinbox.value(), CUSTOM_SIZE_MAX_MM)
 
     def test_photo_rotation_buttons_turn_both_directions_without_changing_crop(
         self,

@@ -9,7 +9,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageOps
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QMimeData, QSize, QThreadPool, QTimer, Qt
+from PySide6.QtCore import QEvent, QMimeData, QSize, QThreadPool, QTimer, Qt
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QIcon,
     QPixmap,
     QResizeEvent,
+    QValidator,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -72,6 +73,10 @@ from ui.theme import CONTROL_ICON_PATHS, apply_theme
 
 ORIGINAL_BACKGROUND = "保持原底"
 CUSTOM_SPEC_LABEL = "自定义"
+CUSTOM_SIZE_PLACEHOLDER = "--"
+# Wide enough that the widget never rejects a keystroke on its own; the real
+# bounds live in core.layout and are enforced when the value is committed.
+CUSTOM_SIZE_ENTRY_MAX_MM = 9999.0
 EMPTY_COUNT_TEXT = "共 — 张"
 DEFAULT_SPACING_MM = 1.0
 SUPPORTED_IMAGE_SUFFIXES = (
@@ -173,6 +178,70 @@ class ImagePreview(QLabel):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+
+
+class CustomSizeSpinBox(QDoubleSpinBox):
+    """Millimetre entry whose empty text means "not filled in yet".
+
+    A plain ``QDoubleSpinBox`` policed the custom bounds through its own range,
+    which made the widget swallow keystrokes instead of reporting a mistake:
+    typing 200 into a 0-152 box left 20 behind and committed it as valid.  The
+    range here stays wide open so ``_commit_custom_dimension`` is the only place
+    that decides what is acceptable, and blank text round-trips to 0 so the
+    field can be cleared back to the unfilled state.
+    """
+
+    def __init__(self, accessible_name: str) -> None:
+        super().__init__()
+        self.setRange(0.0, CUSTOM_SIZE_ENTRY_MAX_MM)
+        self.setDecimals(1)
+        self.setSingleStep(1.0)
+        self.setKeyboardTracking(False)
+        self.setAccessibleName(accessible_name)
+        self.setProperty("invalid", False)
+        self.lineEdit().setPlaceholderText(CUSTOM_SIZE_PLACEHOLDER)
+        self.lineEdit().installEventFilter(self)
+        self.lineEdit().setText("")
+
+    def validate(self, text: str, position: int) -> object:
+        if not text.strip():
+            return (QValidator.State.Acceptable, text, position)
+        return super().validate(text, position)
+
+    def valueFromText(self, text: str) -> float:
+        if not text.strip():
+            return 0.0
+        return super().valueFromText(text)
+
+    def textFromValue(self, value: float) -> str:
+        if value == 0.0:
+            return ""
+        return super().textFromValue(value)
+
+    def stepBy(self, steps: int) -> None:
+        """Keep the arrows inside the valid band so they never produce an error."""
+        if self.value() == 0.0:
+            if steps > 0:
+                self.setValue(CUSTOM_SIZE_MIN_MM)
+            return
+        super().stepBy(steps)
+        self.setValue(
+            min(max(self.value(), CUSTOM_SIZE_MIN_MM), CUSTOM_SIZE_MAX_MM)
+        )
+
+    def eventFilter(self, watched: QWidget, event: QEvent) -> bool:
+        # Qt only selects all on tab focus, so a click would drop the caret
+        # mid-text and the next keystroke would extend the old number rather
+        # than replace it.  A plain click means "give me a different size", so
+        # select everything; a drag or double-click already carries its own
+        # selection and is left alone.
+        if (
+            watched is self.lineEdit()
+            and event.type() == QEvent.Type.MouseButtonRelease
+            and not self.lineEdit().hasSelectedText()
+        ):
+            self.selectAll()
+        return super().eventFilter(watched, event)
 
 
 class MainWindow(QMainWindow):
@@ -349,7 +418,7 @@ class MainWindow(QMainWindow):
         custom_width_row.setContentsMargins(0, 0, 0, 0)
         custom_width_row.setSpacing(8)
         custom_width_row.addWidget(self._field_label("宽"))
-        self.custom_width_spin = self._custom_size_spinbox("自定义宽度")
+        self.custom_width_spin = CustomSizeSpinBox("自定义宽度")
         custom_width_row.addWidget(self.custom_width_spin, 1)
         custom_width_row.addWidget(self._field_label("mm"))
         custom_size_layout.addLayout(custom_width_row)
@@ -363,7 +432,7 @@ class MainWindow(QMainWindow):
         custom_height_row.setContentsMargins(0, 0, 0, 0)
         custom_height_row.setSpacing(8)
         custom_height_row.addWidget(self._field_label("高"))
-        self.custom_height_spin = self._custom_size_spinbox("自定义高度")
+        self.custom_height_spin = CustomSizeSpinBox("自定义高度")
         custom_height_row.addWidget(self.custom_height_spin, 1)
         custom_height_row.addWidget(self._field_label("mm"))
         custom_size_layout.addLayout(custom_height_row)
@@ -717,19 +786,6 @@ class MainWindow(QMainWindow):
         spinbox.setSingleStep(0.5)
         spinbox.setValue(DEFAULT_SPACING_MM)
         spinbox.setAccessibleName(accessible_name)
-        return spinbox
-
-    @staticmethod
-    def _custom_size_spinbox(accessible_name: str) -> QDoubleSpinBox:
-        spinbox = QDoubleSpinBox()
-        spinbox.setRange(0.0, CUSTOM_SIZE_MAX_MM)
-        spinbox.setDecimals(1)
-        spinbox.setSingleStep(1.0)
-        spinbox.setValue(0.0)
-        spinbox.setSpecialValueText("--")
-        spinbox.setKeyboardTracking(False)
-        spinbox.setAccessibleName(accessible_name)
-        spinbox.setProperty("invalid", False)
         return spinbox
 
     def _reset_spacing(self) -> None:
