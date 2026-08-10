@@ -31,9 +31,17 @@ QT_TRANSLATION_NAME = "qtbase_zh_CN"
 
 
 def _translation_directories() -> list[Path]:
+    """Where the Qt catalogue may sit, most authoritative first.
+
+    PyInstaller's Qt hook keeps the bundled layout platform-specific: every
+    platform gets PySide6/Qt/translations except Windows, which drops the Qt
+    level.  Both are listed so neither packaged platform loses its Chinese.
+    """
+    bundle_root = _resource_root()
     return [
         Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)),
-        _resource_root() / "PySide6" / "Qt" / "translations",
+        bundle_root / "PySide6" / "Qt" / "translations",
+        bundle_root / "PySide6" / "translations",
     ]
 
 

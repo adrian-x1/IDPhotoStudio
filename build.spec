@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 from pathlib import Path
+import re
 import sys
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
@@ -17,25 +19,22 @@ def _icon(name: str) -> str | None:
 mac_icon = _icon("icon.icns")
 windows_icon = _icon("icon.ico")
 
+# Apple wants one to three dot-separated integers, so a branch name from a
+# manual run has to fall back rather than be passed through.
+app_version = os.environ.get("APP_VERSION", "").lstrip("v")
+if not re.fullmatch(r"\d+(\.\d+){0,2}", app_version):
+    app_version = "0.0.0"
 
-# Qt ships its own translated strings (line edit context menus, standard dialog
-# buttons).  PyInstaller does not collect them by default, so name the one
-# catalogue main.py loads; a missing file must not fail the build.
-def _qt_translation() -> list[tuple[str, str]]:
-    import PySide6
-
-    catalogue = (
-        Path(PySide6.__file__).parent / "Qt" / "translations" / "qtbase_zh_CN.qm"
-    )
-    if not catalogue.is_file():
-        return []
-    return [(str(catalogue), "PySide6/Qt/translations")]
-
-
+# Qt's own translations (line edit context menus, standard dialog buttons) are
+# collected by PyInstaller's Qt hook already: QtCore declares the "qtbase"
+# catalogue and the hook globs every language of it into the bundle.  Naming
+# the file here as well would mean hardcoding a path that moves between
+# platforms -- the hook puts it under PySide6/Qt/translations everywhere except
+# Windows, where it is PySide6/translations -- so leave the collection to it
+# and let main.py look in both places.
 datas = (
     collect_data_files("onnxruntime")
     + collect_data_files("mediapipe")
-    + _qt_translation()
     + [
         ("assets/models/isnet-general-use.onnx", "assets/models"),
         ("assets/models/face_landmarker.task", "assets/models"),
@@ -131,9 +130,12 @@ if sys.platform == "darwin":
         name="IDPhotoStudio.app",
         icon=mac_icon,
         bundle_identifier="com.adrianx1.idphotostudio",
+        version=app_version,
         info_plist={
             "CFBundleName": "IDPhotoStudio",
             "CFBundleDisplayName": "IDPhotoStudio",
+            "CFBundleShortVersionString": app_version,
+            "CFBundleVersion": app_version,
             "CFBundleDevelopmentRegion": "zh_CN",
             "CFBundleLocalizations": ["zh_CN"],
             "NSHighResolutionCapable": True,
