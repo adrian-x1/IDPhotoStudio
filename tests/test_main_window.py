@@ -44,6 +44,7 @@ from core.crop import (
 from core.detect import FaceDetectionResult
 from core.layout import compose_sheet
 from ui.main_window import (
+    CUSTOM_SPEC_LABEL,
     IMAGE_FILE_FILTER,
     JPEG_FILE_FILTER,
     PDF_FILE_FILTER,
@@ -85,6 +86,15 @@ class MainWindowTests(unittest.TestCase):
     def load_portrait(self) -> bool:
         with patch("ui.main_window.detect_face", return_value=self.detection):
             return self.window.load_image(self.image_path)
+
+    def select_custom_spec(self) -> None:
+        self.window.spec_combo.setCurrentText(CUSTOM_SPEC_LABEL)
+        self.app.processEvents()
+
+    def commit_custom_size(self, spinbox, value: float) -> None:
+        spinbox.setValue(value)
+        spinbox.editingFinished.emit()
+        self.app.processEvents()
 
     def wait_until(self, condition, timeout_ms: int = 3000) -> None:
         deadline = time.monotonic() + timeout_ms / 1000
@@ -415,6 +425,199 @@ class MainWindowTests(unittest.TestCase):
             self.window.crop_view.crop_box.width
             / self.window.crop_view.crop_box.height,
             12 / 16,
+        )
+
+    def test_custom_size_progressively_enables_crop_and_preserves_face(self) -> None:
+        self.assertTrue(self.load_portrait())
+        detected_face = self.window.face
+
+        self.select_custom_spec()
+
+        self.assertTrue(self.window.custom_size_row.isVisible())
+        self.assertEqual(self.window.custom_width_spin.minimum(), 0.0)
+        self.assertEqual(self.window.custom_width_spin.specialValueText(), "--")
+        self.assertIsNone(self.window.crop_view.crop_box)
+        self.assertIs(self.window.face, detected_face)
+        self.assertIsNone(self.window.cropped_original)
+        self.assertIsNone(self.window.finished_photo)
+        self.assertIsNone(self.window.sheet_image)
+        self.assertFalse(self.window.export_button.isEnabled())
+        self.assertFalse(self.window.print_button.isEnabled())
+
+        self.commit_custom_size(self.window.custom_width_spin, 35)
+        self.assertEqual(self.window._custom_width_mm, 35)
+        self.assertIsNone(self.window._custom_height_mm)
+        self.assertIsNone(self.window.crop_view.crop_box)
+        self.assertIs(self.window.face, detected_face)
+
+        self.commit_custom_size(self.window.custom_height_spin, 50)
+        expected = calculate_crop_box(
+            self.face,
+            self.window.source_image.width,
+            self.window.source_image.height,
+            TargetSize(35, 50),
+        ).box
+        self.assertEqual(self.window.crop_view.crop_box, expected)
+        self.assertIsNotNone(self.window.finished_photo)
+        self.assertIsNotNone(self.window.sheet_image)
+        self.assertTrue(self.window.export_button.isEnabled())
+        self.assertTrue(self.window.print_button.isEnabled())
+
+    def test_custom_size_commits_only_on_editing_finished_or_focus_loss(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        self.commit_custom_size(self.window.custom_width_spin, 35)
+        self.commit_custom_size(self.window.custom_height_spin, 50)
+        original_box = self.window.crop_view.crop_box
+
+        self.window.custom_width_spin.setValue(40)
+        self.app.processEvents()
+        self.assertEqual(self.window._custom_width_mm, 35)
+        self.assertEqual(self.window.crop_view.crop_box, original_box)
+
+        self.window.custom_width_spin.editingFinished.emit()
+        self.app.processEvents()
+        committed_box = self.window.crop_view.crop_box
+        self.assertEqual(self.window._custom_width_mm, 40)
+        self.assertNotEqual(committed_box, original_box)
+
+        self.window.custom_height_spin.setFocus()
+        self.app.processEvents()
+        self.window.custom_height_spin.setValue(60)
+        self.assertEqual(self.window._custom_height_mm, 50)
+        self.assertEqual(self.window.crop_view.crop_box, committed_box)
+        self.window.custom_height_spin.clearFocus()
+        self.app.processEvents()
+        self.assertEqual(self.window._custom_height_mm, 60)
+        self.assertNotEqual(self.window.crop_view.crop_box, committed_box)
+
+    def test_invalid_custom_size_keeps_last_committed_crop_until_corrected(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        self.commit_custom_size(self.window.custom_width_spin, 35)
+        self.commit_custom_size(self.window.custom_height_spin, 50)
+        valid_box = self.window.crop_view.crop_box
+
+        self.commit_custom_size(self.window.custom_width_spin, 5)
+        self.assertEqual(self.window._custom_width_mm, 35)
+        self.assertEqual(self.window.crop_view.crop_box, valid_box)
+        self.assertTrue(self.window.custom_width_spin.property("invalid"))
+        self.assertEqual(
+            self.window.warning_label.text(),
+            "宽度需在 10 - 152 mm 之间",
+        )
+        self.assertEqual(self.window.warning_label.property("severity"), "error")
+
+        self.commit_custom_size(self.window.custom_width_spin, 150)
+        self.assertEqual(self.window._custom_width_mm, 150)
+        self.assertFalse(self.window.custom_width_spin.property("invalid"))
+        self.assertEqual(self.window._custom_size_error, "")
+        self.assertNotEqual(self.window.crop_view.crop_box, valid_box)
+
+        self.commit_custom_size(self.window.custom_height_spin, 0)
+        self.assertIsNone(self.window._custom_height_mm)
+        self.assertFalse(self.window.custom_height_spin.property("invalid"))
+        self.assertIsNone(self.window.crop_view.crop_box)
+        self.assertIsNone(self.window.finished_photo)
+        self.assertIsNone(self.window.sheet_image)
+
+    def test_custom_size_warning_priority_separates_layout_from_validation(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        self.commit_custom_size(self.window.custom_width_spin, 100)
+        self.commit_custom_size(self.window.custom_height_spin, 150)
+        valid_box = self.window.crop_view.crop_box
+
+        with patch.object(self.window, "_request_matting"):
+            self.window.red_background_radio.setChecked(True)
+            self.app.processEvents()
+        self.window.margin_spin.setValue(20)
+        self.app.processEvents()
+        self.assertEqual(self.window.crop_view.crop_box, valid_box)
+        self.assertIsNotNone(self.window.finished_photo)
+        self.assertIsNone(self.window.sheet_image)
+        self.assertEqual(
+            self.window.warning_label.text(),
+            "当前排版无法容纳此规格，请减小边距",
+        )
+
+        self.commit_custom_size(self.window.custom_width_spin, 5)
+        self.assertEqual(
+            self.window.warning_label.text(),
+            "宽度需在 10 - 152 mm 之间",
+        )
+        self.commit_custom_size(self.window.custom_width_spin, 100)
+        self.assertEqual(
+            self.window.warning_label.text(),
+            "当前排版无法容纳此规格，请减小边距",
+        )
+
+        self.window.margin_spin.setValue(1)
+        self.app.processEvents()
+        self.assertIn("发丝处留白边", self.window.warning_label.text())
+        self.assertEqual(self.window.warning_label.property("severity"), "")
+
+    def test_custom_size_preserves_values_and_disables_orientation_only_in_mode(
+        self,
+    ) -> None:
+        self.assertTrue(self.load_portrait())
+        self.window.landscape_crop_radio.click()
+        self.select_custom_spec()
+        self.commit_custom_size(self.window.custom_width_spin, 35)
+        self.commit_custom_size(self.window.custom_height_spin, 50)
+
+        self.assertFalse(self.window.crop_orientation_control.isEnabled())
+        self.assertFalse(self.window.portrait_crop_radio.isEnabled())
+        self.assertFalse(self.window.landscape_crop_radio.isEnabled())
+        self.assertEqual(
+            self.window.crop_orientation_control.toolTip(),
+            "自定义尺寸请直接调整宽高",
+        )
+        self.window.gap_spin.setValue(4)
+        self.window.margin_spin.setValue(3)
+        self.window.reset_spacing_button.click()
+        self.app.processEvents()
+        self.assertEqual(self.window._custom_width_mm, 35)
+        self.assertEqual(self.window._custom_height_mm, 50)
+        self.assertEqual(self.window.custom_width_spin.value(), 35)
+        self.assertEqual(self.window.custom_height_spin.value(), 50)
+
+        self.window.spec_combo.setCurrentText("一寸")
+        self.app.processEvents()
+        self.assertFalse(self.window.custom_size_row.isVisible())
+        self.assertTrue(self.window.crop_orientation_control.isEnabled())
+        self.assertTrue(self.window.landscape_crop_radio.isEnabled())
+        self.assertTrue(self.window.landscape_crop_radio.isChecked())
+
+    def test_custom_size_uses_dimensions_in_all_export_default_names(self) -> None:
+        self.assertTrue(self.load_portrait())
+        self.select_custom_spec()
+        self.commit_custom_size(self.window.custom_width_spin, 35)
+        self.commit_custom_size(self.window.custom_height_spin, 50)
+        actions = (
+            self.window.export_photo_jpeg_action,
+            self.window.export_photo_png_action,
+            self.window.export_sheet_jpeg_action,
+            self.window.export_sheet_png_action,
+            self.window.export_sheet_pdf_action,
+        )
+
+        with patch(
+            "ui.main_window.QFileDialog.getSaveFileName",
+            return_value=("", ""),
+        ) as save_dialog:
+            for action in actions:
+                action.trigger()
+
+        self.assertEqual(
+            [dialog_call.args[2] for dialog_call in save_dialog.call_args_list],
+            [
+                "35x50mm.jpg",
+                "35x50mm.png",
+                "35x50mm_4R.jpg",
+                "35x50mm_4R.png",
+                "35x50mm_4R.pdf",
+            ],
         )
 
     def test_photo_rotation_buttons_turn_both_directions_without_changing_crop(

@@ -4,7 +4,12 @@ import unittest
 
 from PIL import Image, ImageChops
 
-from core.layout import CUT_LINE_COLOR, compose_sheet, solve_layout
+from core.layout import (
+    CUT_LINE_COLOR,
+    LayoutTooLargeError,
+    compose_sheet,
+    solve_layout,
+)
 from core.units import mm_to_px
 
 
@@ -69,6 +74,15 @@ class LayoutTests(unittest.TestCase):
                     (result.paper_width_mm, result.paper_height_mm),
                     (152, 102) if paper_rotated else (102, 152),
                 )
+
+    def test_oversized_layout_raises_intentional_value_error_subclass(self) -> None:
+        self.assertTrue(issubclass(LayoutTooLargeError, ValueError))
+
+        with self.assertRaisesRegex(
+            LayoutTooLargeError,
+            "当前排版无法容纳此规格，请减小边距",
+        ):
+            solve_layout(100, 150, margin=20)
 
     def test_compose_sheet_centers_entire_grid_on_4r_canvas(self) -> None:
         photo_width_mm = 25

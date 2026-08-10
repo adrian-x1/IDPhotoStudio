@@ -55,7 +55,14 @@ from core.crop import (
 )
 from core.detect import detect_face
 from core.export import export_jpeg, export_pdf, export_png, render_photo
-from core.layout import LayoutResult, compose_sheet, solve_layout
+from core.layout import (
+    CUSTOM_SIZE_MAX_MM,
+    CUSTOM_SIZE_MIN_MM,
+    LayoutResult,
+    LayoutTooLargeError,
+    compose_sheet,
+    solve_layout,
+)
 from core.matting import composite_background
 from ui.crop_view import CropView
 from ui.matting_worker import MattingWorker
@@ -64,6 +71,7 @@ from ui.theme import CONTROL_ICON_PATHS, apply_theme
 
 
 ORIGINAL_BACKGROUND = "保持原底"
+CUSTOM_SPEC_LABEL = "自定义"
 EMPTY_COUNT_TEXT = "共 — 张"
 DEFAULT_SPACING_MM = 1.0
 SUPPORTED_IMAGE_SUFFIXES = (
@@ -183,6 +191,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.specs = _load_specs()
+        assert CUSTOM_SPEC_LABEL not in self.specs
         self._original_source_image: Image.Image | None = None
         self.source_image: Image.Image | None = None
         self.face: FaceGeometry | None = None
@@ -197,6 +206,13 @@ class MainWindow(QMainWindow):
         self._crop_space_warning = ""
         self._crop_mode_note = ""
         self._input_warnings: list[str] = []
+        self._custom_width_mm: float | None = None
+        self._custom_height_mm: float | None = None
+        self._custom_width_error = ""
+        self._custom_height_error = ""
+        self._custom_size_error = ""
+        self._layout_error = ""
+        self._background_note = ""
         self._crop_revision = 0
         self._foreground_cache: tuple[int, Image.Image] | None = None
         self._active_worker: MattingWorker | None = None
@@ -318,8 +334,41 @@ class MainWindow(QMainWindow):
         parameter_rows.addWidget(self._field_label("规格"))
         self.spec_combo = QComboBox()
         self.spec_combo.addItems(self.specs)
+        self.spec_combo.addItem(CUSTOM_SPEC_LABEL)
         self.spec_combo.setAccessibleName("证件照规格")
         parameter_rows.addWidget(self.spec_combo)
+        parameter_rows.addSpacing(4)
+
+        self.custom_size_row = QWidget()
+        self.custom_size_row.setAccessibleName("自定义证件照尺寸")
+        custom_size_layout = QVBoxLayout(self.custom_size_row)
+        custom_size_layout.setContentsMargins(0, 0, 0, 0)
+        custom_size_layout.setSpacing(3)
+
+        custom_width_row = QHBoxLayout()
+        custom_width_row.setContentsMargins(0, 0, 0, 0)
+        custom_width_row.setSpacing(8)
+        custom_width_row.addWidget(self._field_label("宽"))
+        self.custom_width_spin = self._custom_size_spinbox("自定义宽度")
+        custom_width_row.addWidget(self.custom_width_spin, 1)
+        custom_width_row.addWidget(self._field_label("mm"))
+        custom_size_layout.addLayout(custom_width_row)
+
+        self.custom_size_separator = QLabel("×")
+        self.custom_size_separator.setAccessibleName("宽高分隔符")
+        self.custom_size_separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        custom_size_layout.addWidget(self.custom_size_separator)
+
+        custom_height_row = QHBoxLayout()
+        custom_height_row.setContentsMargins(0, 0, 0, 0)
+        custom_height_row.setSpacing(8)
+        custom_height_row.addWidget(self._field_label("高"))
+        self.custom_height_spin = self._custom_size_spinbox("自定义高度")
+        custom_height_row.addWidget(self.custom_height_spin, 1)
+        custom_height_row.addWidget(self._field_label("mm"))
+        custom_size_layout.addLayout(custom_height_row)
+        self.custom_size_row.setVisible(False)
+        parameter_rows.addWidget(self.custom_size_row)
         parameter_rows.addSpacing(4)
 
         parameter_rows.addWidget(self._field_label("底色"))
@@ -470,6 +519,7 @@ class MainWindow(QMainWindow):
         self.crop_orientation_control.setProperty("segmentedControl", True)
         self.crop_orientation_control.setAccessibleName("裁剪框方向")
         self.crop_orientation_control.setFixedWidth(106)
+        self.crop_orientation_control.setEnabled(False)
         crop_orientation_layout = QHBoxLayout(self.crop_orientation_control)
         crop_orientation_layout.setContentsMargins(1, 1, 1, 1)
         crop_orientation_layout.setSpacing(0)
@@ -594,6 +644,7 @@ class MainWindow(QMainWindow):
         self.warning_label.setWordWrap(True)
         self.warning_label.setVisible(False)
         self.warning_label.setAccessibleName("换底提示")
+        self.warning_label.setProperty("severity", "")
         root.addWidget(self.warning_label)
 
         self.status_bar = QFrame()
@@ -668,6 +719,19 @@ class MainWindow(QMainWindow):
         spinbox.setAccessibleName(accessible_name)
         return spinbox
 
+    @staticmethod
+    def _custom_size_spinbox(accessible_name: str) -> QDoubleSpinBox:
+        spinbox = QDoubleSpinBox()
+        spinbox.setRange(0.0, CUSTOM_SIZE_MAX_MM)
+        spinbox.setDecimals(1)
+        spinbox.setSingleStep(1.0)
+        spinbox.setValue(0.0)
+        spinbox.setSpecialValueText("--")
+        spinbox.setKeyboardTracking(False)
+        spinbox.setAccessibleName(accessible_name)
+        spinbox.setProperty("invalid", False)
+        return spinbox
+
     def _reset_spacing(self) -> None:
         """Restore gap and margin to their defaults, refreshing layout once."""
         self.gap_spin.setValue(DEFAULT_SPACING_MM)
@@ -708,6 +772,12 @@ class MainWindow(QMainWindow):
             self._on_crop_interaction_finished
         )
         self.spec_combo.currentTextChanged.connect(self._on_spec_changed)
+        self.custom_width_spin.editingFinished.connect(
+            self._on_custom_width_committed
+        )
+        self.custom_height_spin.editingFinished.connect(
+            self._on_custom_height_committed
+        )
         self.gap_spin.valueChanged.connect(self._refresh_layout)
         self.margin_spin.valueChanged.connect(self._refresh_layout)
         self.cut_lines_check.toggled.connect(self._refresh_layout)
@@ -735,12 +805,13 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出单张 JPEG",
-            f"{self.spec_combo.currentText()}.jpg",
+            f"{self._export_basename()}.jpg",
             JPEG_FILE_FILTER,
         )
         if not path:
             return
         target = self._current_target_size()
+        assert target is not None
         photo = render_photo(
             self.finished_photo,
             target.width_mm,
@@ -759,12 +830,13 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出单张 PNG",
-            f"{self.spec_combo.currentText()}.png",
+            f"{self._export_basename()}.png",
             PNG_FILE_FILTER,
         )
         if not path:
             return
         target = self._current_target_size()
+        assert target is not None
         photo = render_photo(
             self.finished_photo,
             target.width_mm,
@@ -783,7 +855,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出相纸 JPEG",
-            f"{self.spec_combo.currentText()}_4R.jpg",
+            f"{self._export_basename()}_4R.jpg",
             JPEG_FILE_FILTER,
         )
         if not path:
@@ -802,7 +874,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出相纸 PNG",
-            f"{self.spec_combo.currentText()}_4R.png",
+            f"{self._export_basename()}_4R.png",
             PNG_FILE_FILTER,
         )
         if not path:
@@ -821,7 +893,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出相纸 PDF",
-            f"{self.spec_combo.currentText()}_4R.pdf",
+            f"{self._export_basename()}_4R.pdf",
             PDF_FILE_FILTER,
         )
         if not path:
@@ -833,6 +905,13 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"导出相纸 PDF 失败：{error}")
             return
         self.status_label.setText(f"相纸 PDF 已导出：{path}")
+
+    def _export_basename(self) -> str:
+        size = self._spec_size_mm()
+        if self._is_custom_spec() and size is not None:
+            width_mm, height_mm = size
+            return f"{width_mm:g}x{height_mm:g}mm"
+        return self.spec_combo.currentText()
 
     def _print_current_sheet(self) -> None:
         if self.sheet_image is None or self.sheet_layout is None:
@@ -911,10 +990,31 @@ class MainWindow(QMainWindow):
         for control in (
             self.rotate_photo_left_button,
             self.rotate_photo_right_button,
-            self.portrait_crop_radio,
-            self.landscape_crop_radio,
         ):
             control.setEnabled(enabled)
+        self._refresh_crop_orientation_controls()
+
+    def _refresh_crop_orientation_controls(self) -> None:
+        custom = self._is_custom_spec()
+        enabled = self.source_image is not None and not custom
+        self.crop_orientation_control.setEnabled(enabled)
+        for radio in (self.portrait_crop_radio, self.landscape_crop_radio):
+            radio.setEnabled(enabled)
+
+        if custom:
+            tooltip = "自定义尺寸请直接调整宽高"
+            self.crop_orientation_control.setToolTip(tooltip)
+            self.portrait_crop_radio.setToolTip(tooltip)
+            self.landscape_crop_radio.setToolTip(tooltip)
+            return
+
+        self.crop_orientation_control.setToolTip("")
+        self.portrait_crop_radio.setToolTip(
+            "使用竖版裁剪框；照片方向不变，不改变 6 寸相纸排版"
+        )
+        self.landscape_crop_radio.setToolTip(
+            "使用横版裁剪框；照片方向不变，不改变 6 寸相纸排版"
+        )
 
     def _photo_differs_from_ai_initial(self) -> bool:
         """Report whether resetting would actually change anything."""
@@ -958,9 +1058,74 @@ class MainWindow(QMainWindow):
         return True
 
     def _on_spec_changed(self) -> None:
+        custom = self._is_custom_spec()
+        self.custom_size_row.setVisible(custom)
+        self._refresh_crop_orientation_controls()
+        self._refresh_warning_banner()
         if self.source_image is not None:
             self._refresh_crop(layout_resample=Image.Resampling.BOX)
             self._layout_refine_timer.start()
+
+    def _on_custom_width_committed(self) -> None:
+        self._commit_custom_dimension(
+            self.custom_width_spin,
+            value_attribute="_custom_width_mm",
+            error_attribute="_custom_width_error",
+            dimension_label="宽度",
+        )
+
+    def _on_custom_height_committed(self) -> None:
+        self._commit_custom_dimension(
+            self.custom_height_spin,
+            value_attribute="_custom_height_mm",
+            error_attribute="_custom_height_error",
+            dimension_label="高度",
+        )
+
+    def _commit_custom_dimension(
+        self,
+        spinbox: QDoubleSpinBox,
+        *,
+        value_attribute: str,
+        error_attribute: str,
+        dimension_label: str,
+    ) -> None:
+        value = spinbox.value()
+        error = ""
+        committed_value: float | None
+        if value == 0.0:
+            committed_value = None
+        elif CUSTOM_SIZE_MIN_MM <= value <= CUSTOM_SIZE_MAX_MM:
+            committed_value = value
+        else:
+            committed_value = None
+            error = (
+                f"{dimension_label}需在 {CUSTOM_SIZE_MIN_MM:g} - "
+                f"{CUSTOM_SIZE_MAX_MM:g} mm 之间"
+            )
+
+        setattr(self, error_attribute, error)
+        self._custom_size_error = (
+            self._custom_width_error or self._custom_height_error
+        )
+        self._set_spinbox_invalid(spinbox, bool(error))
+        self._refresh_warning_banner()
+        if error:
+            return
+
+        setattr(self, value_attribute, committed_value)
+        if self._is_custom_spec() and self.source_image is not None:
+            self._refresh_crop()
+
+    @staticmethod
+    def _set_spinbox_invalid(spinbox: QDoubleSpinBox, invalid: bool) -> None:
+        if spinbox.property("invalid") == invalid:
+            return
+        spinbox.setProperty("invalid", invalid)
+        style = spinbox.style()
+        style.unpolish(spinbox)
+        style.polish(spinbox)
+        spinbox.update()
 
     def _rotate_photo_left(self) -> None:
         self._rotate_photo(-1)
@@ -1010,7 +1175,17 @@ class MainWindow(QMainWindow):
         if self.source_image is None:
             return
         self._invalidate_crop_revision()
+        size = self._spec_size_mm()
+        if size is None:
+            self.crop_view.set_image(self.source_image)
+            self._clear_processed_previews(keep_face=True)
+            self._set_matting_progress(False)
+            self.reset_crop_button.setEnabled(False)
+            self._set_custom_size_incomplete_state()
+            return
+
         target = self._current_target_size()
+        assert target is not None
         aspect_ratio = target.width_mm / target.height_mm
         if self.face is not None:
             self._input_warnings = []
@@ -1068,6 +1243,7 @@ class MainWindow(QMainWindow):
     def _set_cropped_original(self, box: CropBox) -> None:
         assert self.source_image is not None
         target = self._current_target_size()
+        assert target is not None
         self.cropped_original = self.source_image.crop(
             integer_crop_bounds(
                 box,
@@ -1106,6 +1282,8 @@ class MainWindow(QMainWindow):
             return
         self._invalidate_crop_revision()
         target = self._current_target_size()
+        if target is None:
+            return
         self._set_cropped_original(box)
         self._update_crop_warning(box, target)
         self.finished_photo = self.cropped_original
@@ -1127,17 +1305,44 @@ class MainWindow(QMainWindow):
         else:
             self._request_matting()
 
-    def _current_target_size(self) -> TargetSize:
+    def _is_custom_spec(self) -> bool:
+        return self.spec_combo.currentText() == CUSTOM_SPEC_LABEL
+
+    def _spec_size_mm(self) -> tuple[float, float] | None:
+        """Return committed millimetres, or None when custom is incomplete."""
+        if self._is_custom_spec():
+            if self._custom_width_mm is None or self._custom_height_mm is None:
+                return None
+            return self._custom_width_mm, self._custom_height_mm
+
+        spec = self.specs.get(self.spec_combo.currentText())
+        assert spec is not None
+        return float(spec["width_mm"]), float(spec["height_mm"])
+
+    def _current_target_size(self) -> TargetSize | None:
         target = self._standard_target_size()
+        if target is None:
+            return None
         width_mm = target.width_mm
         height_mm = target.height_mm
-        if self._crop_orientation_landscape:
+        if self._crop_orientation_landscape and not self._is_custom_spec():
             width_mm, height_mm = height_mm, width_mm
         return TargetSize(width_mm, height_mm)
 
-    def _standard_target_size(self) -> TargetSize:
-        spec = self.specs[self.spec_combo.currentText()]
-        return TargetSize(spec["width_mm"], spec["height_mm"])
+    def _standard_target_size(self) -> TargetSize | None:
+        size = self._spec_size_mm()
+        if size is None:
+            return None
+        return TargetSize(*size)
+
+    def _set_custom_size_incomplete_state(self) -> None:
+        self._crop_warning = ""
+        self._crop_space_warning = ""
+        self._crop_mode_note = ""
+        self._input_warnings = []
+        self._layout_error = ""
+        self._refresh_warning_banner()
+        self.status_label.setText("请填写自定义宽高")
 
     def _on_background_toggled(self, checked: bool) -> None:
         if not checked:
@@ -1158,16 +1363,29 @@ class MainWindow(QMainWindow):
     def _update_background_warning(self) -> None:
         background = self._selected_background()
         if background in {"蓝", "红"}:
-            self.warning_label.setText(
+            self._background_note = (
                 "白底照片换蓝/红底会在发丝处留白边，建议直接用对应背景色重拍"
             )
-            self.warning_label.setVisible(True)
         elif background == "白":
-            self.warning_label.setText("换底是实验功能，效果取决于原图背景。")
-            self.warning_label.setVisible(True)
+            self._background_note = "换底是实验功能，效果取决于原图背景。"
         else:
-            self.warning_label.clear()
-            self.warning_label.setVisible(False)
+            self._background_note = ""
+        self._refresh_warning_banner()
+
+    def _refresh_warning_banner(self) -> None:
+        """Render the highest-priority message: size > layout > background."""
+        size_error = self._custom_size_error if self._is_custom_spec() else ""
+        message = size_error or self._layout_error or self._background_note
+        severity = "error" if size_error or self._layout_error else ""
+        self.warning_label.setText(message)
+        self.warning_label.setVisible(bool(message))
+        if self.warning_label.property("severity") == severity:
+            return
+        self.warning_label.setProperty("severity", severity)
+        style = self.warning_label.style()
+        style.unpolish(self.warning_label)
+        style.polish(self.warning_label)
+        self.warning_label.update()
 
     def _apply_background_selection(
         self,
@@ -1310,33 +1528,40 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self.finished_photo is None:
             return
-        spec = self.specs[self.spec_combo.currentText()]
+        size = self._spec_size_mm()
+        if size is None:
+            return
+        width_mm, height_mm = size
         gap = self.gap_spin.value()
         margin = self.margin_spin.value()
         try:
             layout = solve_layout(
-                spec["width_mm"],
-                spec["height_mm"],
+                width_mm,
+                height_mm,
                 gap=gap,
                 margin=margin,
             )
-        except ValueError:
+        except LayoutTooLargeError as error:
+            self._layout_error = str(error)
             self.sheet_image = None
             self.sheet_layout = None
             self._sheet_preview_is_fast = False
             self.sheet_preview.clear_image("当前参数无法排入相纸")
             self._set_count(0)
             self._refresh_output_actions_enabled()
+            self._refresh_warning_banner()
             return
 
+        self._layout_error = ""
+        self._refresh_warning_banner()
         self.sheet_layout = layout
         layout_photo = self.finished_photo
-        if self._crop_orientation_landscape:
+        if self._crop_orientation_landscape and not self._is_custom_spec():
             layout_photo = layout_photo.transpose(Image.Transpose.ROTATE_270)
         self.sheet_image = compose_sheet(
             layout_photo,
-            spec["width_mm"],
-            spec["height_mm"],
+            width_mm,
+            height_mm,
             layout,
             gap=gap,
             draw_cut_lines=self.cut_lines_check.isChecked(),
@@ -1366,17 +1591,20 @@ class MainWindow(QMainWindow):
         self.count_label.setText(f"共 {count} 张")
         self.count_number_label.setText(str(count))
 
-    def _clear_processed_previews(self) -> None:
-        self.face = None
+    def _clear_processed_previews(self, *, keep_face: bool = False) -> None:
+        if not keep_face:
+            self.face = None
         self.cropped_original = None
         self.finished_photo = None
         self.sheet_image = None
         self.sheet_layout = None
         self._sheet_preview_is_fast = False
+        self._layout_error = ""
         self.crop_preview.clear_image("等待自动裁剪")
         self.sheet_preview.clear_image("等待生成相纸排版")
         self._set_count(None)
         self._refresh_output_actions_enabled()
+        self._refresh_warning_banner()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._invalidate_crop_revision()

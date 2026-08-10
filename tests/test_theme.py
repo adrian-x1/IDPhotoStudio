@@ -161,6 +161,19 @@ class ThemeTests(unittest.TestCase):
         self.assertIn(theme.COLORS["focus"], theme.APP_STYLESHEET)
         self.assertNotIn("outline: none", theme.APP_STYLESHEET.lower())
 
+    def test_error_states_use_dedicated_non_pure_red_tokens(self) -> None:
+        theme = self.load_theme()
+
+        self.assertEqual(theme.COLORS["error"], "#E05252")
+        self.assertEqual(theme.COLORS["error_text"], "#F08A8A")
+        self.assertNotEqual(theme.COLORS["error"], "#FF0000")
+        self.assertNotEqual(theme.COLORS["error_text"], "#FF0000")
+        self.assertIn('QDoubleSpinBox[invalid="true"]', theme.APP_STYLESHEET)
+        self.assertIn(
+            'QLabel#warningLabel[severity="error"]',
+            theme.APP_STYLESHEET,
+        )
+
     def test_header_title_and_export_menu_use_existing_theme_tokens(self) -> None:
         theme = self.load_theme()
 
