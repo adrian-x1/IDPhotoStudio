@@ -41,7 +41,7 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -v
+        run: python -u scripts/run_tests.py
 
       # The tag is the only place the version lives, so hand it to build.spec;
       # without it the .app reports CFBundleShortVersionString 0.0.0 no matter
@@ -85,7 +85,7 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -v
+        run: python -u scripts/run_tests.py
 
       - name: Build the app
         env:
