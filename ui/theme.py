@@ -411,7 +411,7 @@ QDoubleSpinBox[invalid="true"] {{
 /* Reset knob sits inside the gap/margin fields, left of the step arrows, so
    those fields need room on the right that the plain spin boxes do not. */
 QDoubleSpinBox[withResetKnob="true"] {{
-    padding-right: 50px;
+    padding-right: 60px;
 }}
 
 QToolButton[resetKnob="true"] {{
@@ -419,7 +419,7 @@ QToolButton[resetKnob="true"] {{
     padding: 0;
     background: transparent;
     border: 0;
-    border-radius: 4px;
+    border-radius: 14px;
 }}
 
 QToolButton[resetKnob="true"]:hover {{
