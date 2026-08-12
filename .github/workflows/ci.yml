@@ -1,0 +1,61 @@
+name: CI
+
+# Every push and pull request to main runs the suite on both shipping
+# platforms. Release builds run the same command, but only on a tag; without
+# this workflow a break on main stays invisible until release day.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# A newer push to the same branch makes the in-flight run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  tests:
+    name: 测试 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-14 and newer are Apple Silicon, matching what release.yml
+        # builds. mediapipe 1.0.0 ships no macOS x86_64 wheel.
+        os: [macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # No explicit architecture: each runner's default is the one we ship for
+      # (x64 on Windows, arm64 on macos-14). Pinning x64 would break macOS.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Same key as release.yml so both workflows share one cache entry.
+      - name: Cache the 170 MB matting model
+        uses: actions/cache@v4
+        with:
+          path: assets/models/isnet-general-use.onnx
+          key: isnet-general-use-60920e99
+
+      - run: python scripts/fetch_models.py
+
+      # requirements-build.txt is not optional here: tests/test_build_spec.py
+      # execs the head of build.spec, which imports PyInstaller.utils.hooks.
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+
+      # scripts/run_tests.py, not unittest discover: it unbuffers stdout and
+      # dumps every thread's stack after 7 minutes, so a CI hang says where.
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -u scripts/run_tests.py
