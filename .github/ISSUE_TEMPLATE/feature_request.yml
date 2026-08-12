@@ -1,0 +1,27 @@
+name: 功能建议
+description: 希望增加或改进某个功能
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 先说场景，不用直接说要什么控件。比如「打印店要求交 5 寸相纸的版，现在只能排 6 寸」。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你设想怎么做
+      description: 有具体想法就写，没有也可以留空。
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现在你是怎么绕过去的
+      description: 用了别的工具、手动改尺寸，还是干脆放弃了。
+    validations:
+      required: false

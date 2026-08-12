@@ -12,6 +12,7 @@ windows-wheels/
 windows-one-click.log
 *.dmg
 installer/Output/
+.claude/
 
 # 内部开发文档，不公开
 WINDOWS.md

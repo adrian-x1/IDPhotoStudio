@@ -1,0 +1,66 @@
+name: Bug 报告
+description: 用起来不对、报错、崩溃
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。裁剪或排版结果不对的话，附一张截图最省事。
+
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      description: 安装包文件名里的版本号，或菜单里显示的版本
+      placeholder: v0.3.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - macOS（Apple Silicon）
+        - Windows 11
+        - Windows 10
+        - 从源码运行
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: os_version
+    attributes:
+      label: 系统版本号
+      placeholder: macOS 15.3 / Windows 11 23H2
+    validations:
+      required: false
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: 出了什么问题
+      description: 你期望发生什么，实际发生了什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 导入一张 4032×3024 的照片
+        2. 规格选「小二寸」，底色选蓝
+        3. 点导出整版相纸
+        4. 排版只有 6 张，预期 8 张
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 截图或报错信息
+      description: 可以直接把图片拖进这个框。从源码运行的话，请贴终端里的完整报错。
+    validations:
+      required: false

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/adrian-x1/IDPhotoStudio/security/advisories/new
+    about: 请不要开公开 Issue，走私下报告流程。
+  - name: 打印偏色或有竖条纹
+    url: https://github.com/adrian-x1/IDPhotoStudio#%E6%89%93%E5%8D%B0%E8%AF%B4%E6%98%8E
+    about: 先确认打印机驱动里的纸张类型选了「光泽照片纸」。
